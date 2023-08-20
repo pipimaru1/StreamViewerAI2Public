@@ -367,3 +367,4 @@ MigrationBackup/
 FodyWeavers.xsd
 /StreamViewerAI2/log.txt
 /StreamViewerAI2/ai_proccessed.csv
+/StreamViewerAI2/yolov5s.onnx
