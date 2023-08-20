@@ -5,7 +5,6 @@
 #include "StreamVierwer.h"
 #include "yolov5_engine.h"
 
-
 #define MAX_LOADSTRING 100
 
 #define _AI_NAMES "coco.names"
