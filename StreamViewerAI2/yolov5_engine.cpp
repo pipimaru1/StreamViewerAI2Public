@@ -1,18 +1,4 @@
 #include "stdafx.h"
-/*
-#include <iostream>
-#include <string>
-#include <locale>
-#include <codecvt>
-#include <fstream>
-#include <filesystem>
-#include <vector>
-#define NOMINMAX
-#include <windows.h>
-#include <torch/torch.h>
-#include <opencv2\opencv.hpp>
-#include <onnxruntime_cxx_api.h>
-*/
 
 #include "yolov5_engine.h"
 #include "logfile.h"
@@ -20,12 +6,6 @@
 using namespace cv;
 using namespace std;
 using namespace cv::dnn;
-
-//‚±‚êŽŽ‚·
-//https://learnopencv.com/object-detection-using-yolov5-and-opencv-dnn-in-c-and-python/
-//https://github.com/spmallick/learnopencv/tree/master/Object-Detection-using-YOLOv5-and-OpenCV-DNN-in-CPP-and-Python
-// 
-// Constants.
 
 // Colors.
 Scalar BLACK = Scalar(0, 0, 0);

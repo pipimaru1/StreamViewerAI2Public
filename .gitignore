@@ -32,6 +32,10 @@ bld/
 [Oo]ut/
 [Ll]og/
 [Ll]ogs/
+#追加
+*.onnx
+log.txt
+*.csv
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/
@@ -361,3 +365,5 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/StreamViewerAI2/log.txt
+/StreamViewerAI2/ai_proccessed.csv
