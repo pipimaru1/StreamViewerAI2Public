@@ -1,6 +1,5 @@
 
 #include "stdafx.h"
-
 //#include <vector>
 //#include <atltypes.h>
 //#include <thread>
