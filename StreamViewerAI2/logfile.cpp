@@ -22,7 +22,11 @@ _LogFile::_LogFile(const char* fpath)
 int _LogFile::open(const char* fpath)
 {
 	_fpath = std::string(fpath);
+	//_TimeStump();
+	//_LF << "APPLICATION START" << std::endl;
 	_LF = std::ofstream(fpath, std::ios_base::out);
+	//_LF = std::ofstream(_fpath.c_str(), std::ios_base::out);
+	//_LF << "START" << _get_YYYYMMDD() << " "<< _get_hhmmss() <<std::endl;
 
 	return 0;
 }
@@ -71,13 +75,46 @@ std::string _str_YYMMDD()
 }
 
 
+/*
+std::string _STR_TimeStumpStr()
+{
+	USES_CONVERSION;
+	return A2OLE(_TimeStumpStr());
+}
+*/
 
 int _LogFile::_TimeStump()
 {
+	//std::time_t rawtime;
+	//std::tm timeinfo;
+	//std::time(&rawtime);
+	//localtime_s(&timeinfo, &rawtime);
+	//long tmpYYYYMMDD = (1900 + timeinfo.tm_year) * 10000 + (timeinfo.tm_mon + 1) * 100 + timeinfo.tm_mday;
+	//long tmpHHMMSS = timeinfo.tm_hour * 10000 + timeinfo.tm_min * 100 + timeinfo.tm_sec;
+
+	//_LF << (1900 + timeinfo.tm_year) << "/" << (timeinfo.tm_mon + 1) << "/" << timeinfo.tm_mday << " " << timeinfo.tm_hour << ":" << timeinfo.tm_min << ":" << timeinfo.tm_sec<<std::endl;
 	_LF << _TimeStumpStr() << std::endl;
 	return 0;
 }
 
+
+//Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°
+//ÉVÉXÉeÉÄä÷åW
+//Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°
+/*MFCàÀë∂
+void DoEvents(int n)
+{
+	MSG msg;
+	for (int i = 0; i < n; i++)
+	{
+		while (::PeekMessage(&msg, NULL, NULL, NULL, PM_NOREMOVE))
+		{
+			if (!AfxGetApp()->PumpMessage())
+				return;
+		}
+	}
+}
+*/
 
 //Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°Å°
 //éûä‘ä÷åW

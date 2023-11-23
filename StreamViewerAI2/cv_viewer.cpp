@@ -1,5 +1,6 @@
 
 #include "stdafx.h"
+
 //#include <vector>
 //#include <atltypes.h>
 //#include <thread>
@@ -23,13 +24,19 @@
 //drawing_position 0:全部 1:左上 2:右上 3:右下 4:左下
 //volatile int cvw_status = 0;
 volatile bool cvw_stop = true;
-volatile bool cvw_set_stop = 0;
+volatile bool cvw_set_stop = false;
+volatile bool cvw_file_processing = false;
+volatile bool cvw_file_end = false;
+
 volatile int display_time_seconds = INIT_INTERVAL_TIME_SEC;// 8;
 volatile int sleep = INIT_FPS_MSEC;// 100;
 extern bool _ai_text_output=false;
 volatile bool _next_source = false; //次の画面に行く
 volatile bool _drawing_flag = false; //AIの演算が重なるのを防ぐ
 std::vector<std::vector<std::string>> cam_urls; //[0]にはタイトル、[1]にはurlが入っている
+
+volatile bool _VIDEO_REC = false;
+volatile bool _VIDEO_RECODING = false;
 
 int DrawPicToHDC(cv::Mat cvImg, HWND hWnd, HDC hDC, bool bMaintainAspectRatio, int drawing_position); //bMaintainAspectRatio=true
 
@@ -221,6 +228,81 @@ void wait_drawing()
 	}
 }
 
+//my_video_writer::my_video_writer(std::string _fname)
+my_video_writer::my_video_writer(const char* _fname)
+{
+	//output.open(filename.c_str(), fourcc, fps, cv::Size(width, height));
+	//open(_fname);
+	my_video_writer();
+	filename = _fname;
+}
+my_video_writer::my_video_writer()
+{
+	fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
+	//fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
+	//fourcc = cv::VideoWriter::fourcc('X', 'V', 'I', 'D');
+	fps = 30; //動画からfpsを取得
+	width = 720; //動画から幅を取得
+	height = 480; //動画から高さを取得
+	filename = "output.mp4";
+	//my_video_writer("output.mp4");
+}
+
+int my_video_writer::open(const char* _fname)
+{
+	filename = _fname;
+	//output.open(filename.c_str(), fourcc, fps, cv::Size(width, height));
+	//return 0;
+	return open();
+}
+
+int my_video_writer::open()
+{
+	if (_VIDEO_REC == false)
+	{
+		output.open(filename.c_str(), fourcc, fps, cv::Size(width, height));
+		_VIDEO_REC = true;
+	}
+	return 0;
+}
+
+int my_video_writer::write(cv::Mat& frame)
+{
+	if (_VIDEO_REC == true)
+	{	//cv::Mat frame_resized;
+		cv::resize(frame, frame_resized, cv::Size(), ((double)width / (double)frame.cols), ((double)height / (double)frame.rows));
+		output << frame_resized;
+	}
+	return 0;
+}
+int my_video_writer::release()
+{
+	if (_VIDEO_REC == true)
+	{
+		output.release();
+		_VIDEO_REC = false;
+	}
+	return 0;
+}
+
+my_video_writer _mvw_org;
+my_video_writer _mvw_ai;
+
+int  _rec_stump(cv::Mat& _image, bool rec, double _size=1.0)
+{
+	long _error = 0;
+	if (rec)
+	{
+		//cv::Size(_image);
+		int X1 = _image.cols - 70 * _size;
+		int Y1 = 26 * _size;
+
+		cv::putText(_image, "REC", cv::Point(X1, Y1), cv::FONT_HERSHEY_SIMPLEX, _size, cv::Scalar(0, 0, 255), 4* _size);
+	}
+	return 1;
+}
+
+
 //■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
 int DrawCV2Window(
 	HWND hWnd,		//Windowハンドル
@@ -239,14 +321,15 @@ int DrawCV2Window(
 	cv::Mat resized_image;
 	cv::Mat post_proccesed_image;
 
-
 	//明示的にキャスト 
 	YoloObjectDetection* _pt_yod = (YoloObjectDetection*)__pt_yod;
 
 	int current_url_index = 0;
 	//int display_time_seconds = 3; // Change display time in seconds
-
 	HDC hDC = ::GetDC(hWnd);
+
+	//_mvw_org.open("video_org.mp4");
+	//_mvw_ai.open("video_ai.mp4");
 
 	while (true)
 	{
@@ -309,7 +392,8 @@ int DrawCV2Window(
 				cvw_set_stop = true;
 				goto GOTO_LOOPEND;
 			}
-			resize(
+			//ここでリサイズ
+			cv::resize(
 				image0,
 				resized_image,
 				cv::Size(),
@@ -327,8 +411,13 @@ int DrawCV2Window(
 			post_proccesed_image = _pt_yod->_post_process(true, image0.clone(), _header.str().c_str(), _ost);
 			_drawing_flag = false;
 
+			_mvw_org.write(image0);
+			_mvw_ai.write(post_proccesed_image);
+
+
 			//AllPaintBlack(hWnd, hDC); //ちらつく
 			//描画
+			_rec_stump(post_proccesed_image, _mvw_ai._VIDEO_REC);
 			DrawPicToHDC(post_proccesed_image, hWnd, hDC, true, draw_area);//アスペクト比を維持する。
 
 			_ai_out_put_string = _ai_out_put_string + "\n" + _ost;
@@ -345,21 +434,24 @@ int DrawCV2Window(
 				pAICSV->flush();
 			}
 
-			MSG msg;
-			if (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+			if (0) //ループ内でWindowsに制御を渡す処理だが特に要らないようだ
 			{
-				::TranslateMessage(&msg);
-				::DispatchMessage(&msg);
+				MSG msg;
+				if (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+				{
+					::TranslateMessage(&msg);
+					::DispatchMessage(&msg);
+				}
+				DoEvents();
+				Sleep(sleep);
 			}
-			DoEvents();
-			Sleep(sleep);
 
 			GOTO_LOOPEND:
 			auto now = std::chrono::steady_clock::now();
 			//タイマー
 			if (std::chrono::duration_cast<std::chrono::seconds>(now - start).count() >= display_time_seconds)
 				break;
-			//次の画面
+			//次の画面 フラグをリセットしループから出る
 			if (_next_source)
 			{
 				_next_source = false;
@@ -378,12 +470,178 @@ int DrawCV2Window(
 
 		current_url_index = (current_url_index + 1) % (int)urls.size();
 	}
+	cvw_stop = true;
 
 	ReleaseDC(hWnd, hDC);
-	cvw_stop = true;
+	_mvw_org.release();
+	_mvw_ai.release();
 	return 0;
 }
 
+
+//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+int DrawCV2Windowf(
+	HWND hWnd,		//Windowハンドル
+	void* __pt_yod,	//yolov5処理クラスのインスタンスへのポインタ nullだと無視
+	std::string _file_name,
+	int draw_area,
+	std::ofstream* pAICSV
+)
+{
+	bool _cam_on = false;
+	cvw_stop = 0;
+	cv::VideoCapture capture;
+	cv::Mat image0;
+
+	std::string _ai_out_put_string;
+	cv::Mat resized_image;
+	cv::Mat post_proccesed_image;
+
+	//明示的にキャスト 
+	YoloObjectDetection* _pt_yod = (YoloObjectDetection*)__pt_yod;
+
+	int current_url_index = 0;
+	//int display_time_seconds = 3; // Change display time in seconds
+	HDC hDC = ::GetDC(hWnd);
+
+	auto start = std::chrono::steady_clock::now();
+	//ウィンドウキャプションの文字列
+	//std::string _ipurl = urls[current_url_index][1];
+	std::ostringstream window_caption;
+	window_caption << _file_name << " " << ((YoloObjectDetection*)__pt_yod)->_YP._onnx_file_name;
+	std::wstring newTitleW = stringToWstring(window_caption.str().c_str());
+	SetWindowTextW(hWnd, newTitleW.c_str());
+
+	//数字だったらUSBカメラ
+	//この処理要らんかも
+	int num_usb;
+	std::istringstream iss(_file_name);
+	if (iss >> num_usb)
+	{
+		capture.open(num_usb);
+	}
+	else
+	{
+		capture.open(_file_name);
+	}
+
+	//画面を黒く塗りつぶす
+	AllPaintBlack(hWnd, hDC);
+	//テキストをクリア
+	_ai_out_put_string = "";
+	DoEvents();
+	if (capture.isOpened())
+	{
+		_cam_on = true;
+	}
+	else
+	{
+		std::cerr << "Failed to open the stream: " << _file_name << std::endl;
+		_cam_on = false;
+	}
+
+	//while (true)
+	while (capture.read(image0))
+	{
+		//cvw_file_processing = true;
+		cvw_file_end = false;
+
+		std::string _ost;
+		//capture >> image0;
+
+		//AI処理
+		float NMS_INIT = _pt_yod->_YP._nms_threshold;
+		float CNF_INIT = _pt_yod->_YP._confidence_thresgold;
+		float SCR_INIT = _pt_yod->_YP._score_threshold;
+
+		//CSV出力の生成
+		std::ostringstream _header;
+
+		//cv::Mat resized_image;
+		cvw_set_stop = false;
+		if (image0.empty() || image0.rows == 0 || image0.cols == 0)
+		{
+			cvw_set_stop = true;
+			goto GOTO_LOOPEND;
+		}
+			//ここでリサイズ
+		cv::resize(
+			image0,
+			resized_image,
+			cv::Size(),
+			(double)_pt_yod->_YP._input_width / image0.cols,
+			(double)_pt_yod->_YP._input_height / image0.rows);
+
+		wait_drawing();
+		_drawing_flag = true;
+
+		//AIの処理
+		_pt_yod->_pre_process(resized_image);
+
+		//AIの後処理
+		_header << "AI,\"" << _file_name << "\"," << _file_name << "," << _TimeStumpStr();
+		post_proccesed_image = _pt_yod->_post_process(true, image0.clone(), _header.str().c_str(), _ost);
+		_drawing_flag = false;
+
+		_mvw_org.write(image0);
+		_mvw_ai.write(post_proccesed_image);
+
+
+		//AllPaintBlack(hWnd, hDC); //ちらつく
+		//描画
+		_rec_stump(post_proccesed_image, _mvw_ai._VIDEO_REC);
+		DrawPicToHDC(post_proccesed_image, hWnd, hDC, true, draw_area);//アスペクト比を維持する。
+
+		_ai_out_put_string = _ai_out_put_string + "\n" + _ost;
+		if (_ai_text_output)
+		{
+			//aiの出力をテキストで画面にバーっと出す。ターミネーター、のようにはならなかった。
+			MyDrawText(hWnd, hDC, _ai_out_put_string, 5, 50);
+		}
+
+		//AIの出力をテキストファイルに保存
+		if (pAICSV != nullptr)
+		{
+			*pAICSV << _ost;
+			pAICSV->flush();
+		}
+
+		if(0) //ループ内でWindowsにリソースを渡す処理だが特に要らないようだ
+		{
+			MSG msg;
+			if (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+			{
+				::TranslateMessage(&msg);
+				::DispatchMessage(&msg);
+			}
+
+			DoEvents();
+			Sleep(10);
+		}
+	GOTO_LOOPEND:
+		//フラグをリセットしループから出る　_next_sourceは特定のキーが押されたときWinProcで値が入る
+		if (_next_source)
+		{
+			_next_source = false;
+			break;
+		}
+		if (cvw_set_stop == true)
+			break;
+	}
+	capture.release();
+
+	//処理が終わったことをwinprocに伝えるためのフラグ
+	cvw_file_processing = false;
+	cvw_file_end = true;
+
+	//↓これ要るか?
+	cvw_stop = true;
+
+	ReleaseDC(hWnd, hDC);
+	_mvw_org.release();
+	_mvw_ai.release();
+	return 0;
+}
 
 //■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
 void AdjustAspectImageSize(const cv::Size& imageSize, const cv::Size& destSize, cv::Size& newSize)

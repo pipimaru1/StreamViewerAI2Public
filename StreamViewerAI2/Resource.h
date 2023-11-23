@@ -10,7 +10,12 @@
 #define IDD_ABOUTBOX			103
 #define IDM_ABOUT				104
 #define IDM_EXIT				105
+#define IDM_INPUTFILE			300
+
 #define IDM_TEXTOUTPUT			106
+#define IDM_VIDEOREC_VGA		200
+#define IDM_VIDEOREC_HD			201
+#define IDM_VIDEOREC_END		202
 
 #define IDI_STREAMVIERWER		107
 #define IDI_SMALL				108

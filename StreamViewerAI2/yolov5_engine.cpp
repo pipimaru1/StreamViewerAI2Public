@@ -7,6 +7,12 @@ using namespace cv;
 using namespace std;
 using namespace cv::dnn;
 
+//これ試す
+//https://learnopencv.com/object-detection-using-yolov5-and-opencv-dnn-in-c-and-python/
+//https://github.com/spmallick/learnopencv/tree/master/Object-Detection-using-YOLOv5-and-OpenCV-DNN-in-CPP-and-Python
+// 
+// Constants.
+
 // Colors.
 Scalar BLACK = Scalar(0, 0, 0);
 Scalar BLUE = Scalar(255, 178, 50);
@@ -163,7 +169,9 @@ int pre_process(vector<Mat>& outputs,Mat& input_image, Net& net, float input_wid
             blobFromImage(input_image, blob, 1. / 255., Size(input_width, input_height), Scalar(), true, false);
             net.setInput(blob);
             // Forward propagate.
+            //_LOGMSG2("outputs1", outputs);
             net.forward(outputs, net.getUnconnectedOutLayersNames());
+            //_LOGMSG2("outputs2", outputs);
             ret = 0;
         }
     }    
@@ -229,7 +237,7 @@ Mat post_process_str(
         {
             float* classes_scores = data + 4;
 
-            cv::Mat scores(1, class_name.size(), CV_32FC1, classes_scores);
+            cv::Mat scores(1, (int)class_name.size(), CV_32FC1, classes_scores);
             cv::Point class_id;
             double maxClassScore;
 
@@ -263,7 +271,7 @@ Mat post_process_str(
             {
                 float* classes_scores = data + 5;
                 // Create a 1x85 Mat and store class scores of 80 classes.
-                Mat scores(1, class_name.size(), CV_32FC1, classes_scores);
+                Mat scores(1, (int)class_name.size(), CV_32FC1, classes_scores);
                 // Perform minMaxLoc and acquire the index of best class  score.
                 Point class_id;
                 double max_class_score;
@@ -375,12 +383,15 @@ Mat post_process_str(
             << width << ","
             << height << ","
             << yp._onnx_file_name << ","
-            << yp._names_file_name << endl;
+            << yp._names_file_name << ","
+            << input_image.cols << ","
+            << input_image.rows << endl;
+
     }
     _ost = _os.str().c_str();
     return input_image;
 }
-
+//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
 //■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
 YoloObjectDetection::YoloObjectDetection()
 {
@@ -406,8 +417,13 @@ YoloObjectDetection::YoloObjectDetection()
     _YFP._thickness_box = THICKNESS_BOX;
 }
 
-
-LPCWSTR A2CW(const std::string& ascii)
+//TR A2CW(const char* str)
+//{
+//    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+//    return converter.from_bytes(str).c_str();
+//}
+//std::wstring A2CW(const std::string& ascii)
+LPCWSTR _A2CW(const std::string& ascii)
 {
     int len = MultiByteToWideChar(CP_ACP, 0, ascii.c_str(), -1, NULL, 0);
     if (len == 0) {
@@ -428,11 +444,27 @@ LPCWSTR A2CW(const std::string& ascii)
 //AIの初期化
 //識別名リストとonnxファイルを読み込む
 //■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-
+//int YoloObjectDetection::init_yolov5(
+//    string filepath_of_names, 
+//    string filepath_of_onnx,
+//    //int clssification_size, 
+//    float _iw, float _ih, float _sc_th,float _nms_th, float _conf_th, 
+//    bool __count_of_person, 
+//    bool __count_of_time)
+//GPUデバイスを選択するときは、cuda_runtime.hをインクルードして、cudaSetDevice(int device)を指定する。
+//#include <cuda_runtime.h>
+//cudaSetDevice(0);
 int YoloObjectDetection::init_yolov5(YoloAIParametors yp, bool __count_of_person, bool __count_of_time)
 {
     //USES_CONVERSION;
     _YP = yp;
+    //_YP._input_width = _iw;
+    //_YP._input_height = _ih;
+    //_YP._score_threshold = _sc_th;
+    //_YP._nms_threshold = _nms_th;
+    //_YP._confidence_thresgold = _conf_th;
+    //_YP._names_file_name = filepath_of_names;
+    //_YP._onnx_file_name = filepath_of_onnx;
 
     _count_of_person = __count_of_person;
     _count_of_time = __count_of_time;
@@ -448,7 +480,7 @@ int YoloObjectDetection::init_yolov5(YoloAIParametors yp, bool __count_of_person
         << "onnx: " << _YP._onnx_file_name << std::endl
         << "input width: " << _YP._input_width << std::endl
         << "input height: " << _YP._input_height << std::endl;
-    LPCWSTR _lpcmsg = A2CW(_msg.str().c_str());
+    LPCWSTR _lpcmsg = _A2CW(_msg.str().c_str());
     //LPCWSTR _lpcmsg = _msg.str().c_str();
 
     _list_of_class.clear();
@@ -459,10 +491,10 @@ int YoloObjectDetection::init_yolov5(YoloAIParametors yp, bool __count_of_person
         _list_of_class.push_back(line);
         ++_YP._clssification_size;
     }
-
      // Load model. yolov8だとreadNetまたはreadNetFromONNXでエラーが出る
     try
     {
+        //cudaSetDevice(0);
         _LOGMSG("dnn::readNetFromONNX:" <<_YP._onnx_file_name);
         net=cv::dnn::readNetFromONNX(_YP._onnx_file_name);
 
@@ -504,7 +536,7 @@ vector<Mat>& YoloObjectDetection::_pre_process(Mat& input_image)
 }
 
 cv::Mat YoloObjectDetection::_post_process(
-    bool draw_image,    //ふつうはture, falseにすると描画処理をしない。
+    bool draw_image,    //ふつうはture。falseにすると描画処理をせず、解析データをテキストに書くだけになる。
     const cv::Mat& input_image, 
     std::string _header, std::string& _ost
 )

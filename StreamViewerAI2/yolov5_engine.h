@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 #include <iostream>
 #include <opencv2\opencv.hpp>
+//#include "E:\Programing\opencv480g\build\install\include\opencv2\opencv.hpp"
 #include <fstream>
 #include <filesystem>
 #include <vector>
@@ -14,8 +15,16 @@
 #define DEFAULT_NAMES_FILE_PATH_YOLOV5 "yolov5s.names"
 //#define DEFAULT_CLASSIFICATION_SIZE 12
 
+
+#ifdef _GPUX
+#define DEFAULT_AI_INPUT_WIDTH 1280.0f
+#define DEFAULT_AI_INPUT_HEIGHT 1280.0f
+#else
 #define DEFAULT_AI_INPUT_WIDTH 640.0f
 #define DEFAULT_AI_INPUT_HEIGHT 640.0f
+#endif
+
+
 
 #define DEFAULT_SCORE_THRESHOLD  0.2f
 #define DEFAULT_NMS_THRESHOLD  0.60f
@@ -148,3 +157,4 @@ cv::Mat post_process_str(
     std::string& _ost               //AI‚Ì‰ğÍŒ‹‰Ê‚ğ‘‚«‚ñ‚¾•¶š—ñ‚ÌŠi”[êŠ
 );
 
+LPCWSTR _A2CW(const std::string& ascii);
