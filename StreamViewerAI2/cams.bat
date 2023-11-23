@@ -1,1 +1,1 @@
-StreamVierwerAI.exe cams.txt yolov5m.onnx coco.names
+StreamVierwerAI2.exe -l cams.txt -x yolov5m.onnx -n coco.names
