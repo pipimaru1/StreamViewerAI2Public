@@ -443,7 +443,12 @@ xcopy /Y /D "C:\ProgramData\Anaconda3\pkgs\hdf5-1.10.6-h1756f20_1\Library\bin\hd
     <ResourceCompile Include="StreamVierwer.rc" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="default.names" />
+    <None Include="default.onnx" />
     <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="default.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
