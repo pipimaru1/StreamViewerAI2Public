@@ -449,6 +449,8 @@ xcopy /Y /D "C:\ProgramData\Anaconda3\pkgs\hdf5-1.10.6-h1756f20_1\Library\bin\hd
   </ItemGroup>
   <ItemGroup>
     <Text Include="default.txt" />
+    <Text Include="LICENSE.txt" />
+    <Text Include="NOTICE.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
