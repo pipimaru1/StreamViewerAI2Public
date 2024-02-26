@@ -2,10 +2,19 @@
 
 #include "yolov5_engine.h"
 #include "logfile.h"
+#include "mylib.h"
 
 using namespace cv;
 using namespace std;
 using namespace cv::dnn;
+
+//#define DEFAULT_SCORE_THRESHOLD  0.2f
+//#define DEFAULT_NMS_THRESHOLD  0.60f
+//#define DEFAULT_CONF_THRESHOLD  0.2f
+
+float DEFAULT_SCORE_THRESHOLD = 0.4;
+float DEFAULT_NMS_THRESHOLD = 0.5;
+float DEFAULT_CONF_THRESHOLD = 0.4;
 
 //これ試す
 //https://learnopencv.com/object-detection-using-yolov5-and-opencv-dnn-in-c-and-python/
@@ -22,68 +31,26 @@ Scalar RED = Scalar(0, 0, 255);
 Scalar GREY = Scalar(64, 64, 64);
 Scalar DARKGREEN = Scalar(32, 200, 32);
 
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-#define TRYCAT_CV(tryal_codes) try\
-{\
-	tryal_codes;\
-}\
-catch (cv::Exception e){\
-	const char* err_msg = e.what();\
-	cerr << "RUNTIME ERROR IN CV:"<<__FILE__<<":"<<__LINE__<<"\n" << err_msg << std::endl;\
-}
-
-#define TRYCAT_CV_STD(tryal_codes) try\
-{\
-	tryal_codes;\
-}\
-catch (cv::Exception e){\
-	const char* err_msg = e.what();\
-	cerr << "RUNTIME ERROR IN CV:"<<__FILE__<<":"<<__LINE__<<"\n" << err_msg << std::endl;\
-}\
-catch (std::exception e) {\
-    const char* err_msg = e.what(); \
-    cerr << "RUNTIME ERROR IN CV:" << __FILE__ << ":" << __LINE__ << "\n" << err_msg << std::endl; \
-}
-//try catchを無効にするマクロ
-#define _TRYCAT_CV_STD(tryal_codes)  tryal_codes;
-#define _TRYCAT_CV(tryal_codes)  tryal_codes;
-#define _TRYCAT_STD(tryal_codes)  tryal_codes;
-
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 YoloAIParametors::YoloAIParametors()
 {
-    _input_width = DEFAULT_AI_INPUT_WIDTH;
-    _input_height = DEFAULT_AI_INPUT_HEIGHT;
-    _score_threshold = DEFAULT_SCORE_THRESHOLD;
-    _nms_threshold = DEFAULT_NMS_THRESHOLD;
-    _confidence_thresgold = DEFAULT_CONF_THRESHOLD;
+    yolo_version = YOLOV5;
+    input_width = DEFAULT_AI_INPUT_WIDTH;
+    input_height = DEFAULT_AI_INPUT_HEIGHT;
+    score_threshold = DEFAULT_SCORE_THRESHOLD;
+    nms_threshold = DEFAULT_NMS_THRESHOLD;
+    confidence_thresgold = DEFAULT_CONF_THRESHOLD;
 
-    _clssification_size=0;
-    _onnx_file_name = std::string();
-    _names_file_name = std::string();
+    clssification_size=0;
+    onnx_file_name = std::string();
+    names_file_name = std::string();
 }
 
 YoloAIParametors::~YoloAIParametors()
 {
 }
 
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-bool YoloObjectDetection::busy()
-{
-    return _busy;
-}
-
-bool YoloObjectDetection::busy_set()
-{
-    return _busy=true;
-}
-
-bool YoloObjectDetection::busy_relese()
-{
-    return _busy = false;
-}
-
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #define LABEL_IN_BOX false
 #define LABEL_OUT_BOX true
 //void draw_label(Mat& input_image, string label, int left, int top, float _font_scale, int _thickness_font, int _fontface, cv::Scalar _rect_color)
@@ -91,7 +58,7 @@ void draw_label(Mat& input_image, string label, int left, int top, CvFontParam c
 {
     // Display the label at the top of the bounding box.
     int baseLine;
-    Size label_size = getTextSize(label, cfp._face, cfp._scale, cfp._thickness, &baseLine);
+    Size label_size = getTextSize(label, cfp.face, cfp.scale, cfp.thickness, &baseLine);
     top = max(top, label_size.height);
     if (0) //参考元にあったコード? 使っていない
     {
@@ -114,24 +81,200 @@ void draw_label(Mat& input_image, string label, int left, int top, CvFontParam c
         //↓??
         if (0)
         {
-            putText(input_image, label, Point(left, top + label_size.height), cfp._face, cfp._scale,  BLACK, cfp._thickness + 1);
-            putText(input_image, label, Point(left, top + label_size.height), cfp._face, cfp._scale, YELLOW, cfp._thickness);
+            putText(input_image, label, Point(left, top + label_size.height), cfp.face, cfp.scale,  BLACK, cfp.thickness + 1);
+            putText(input_image, label, Point(left, top + label_size.height), cfp.face, cfp.scale, YELLOW, cfp.thickness);
         }
     }
 
     if (LABEL_IN_BOX)
     {
         rectangle(input_image, Point(left, top), Point(left + 105, top + 11), _rect_color, -1);
-        putText(input_image, label, Point(left, top + label_size.height), cfp._face, cfp._scale, BLACK, cfp._thickness);
+        putText(input_image, label, Point(left, top + label_size.height), cfp.face, cfp.scale, BLACK, cfp.thickness);
         //putText(input_image, label, Point(left, top + label_size.height), _fontface, _font_scale, YELLOW, _thickness_font);
     }
     if (LABEL_OUT_BOX)
     {
         rectangle(input_image, Point(left-1, top-11), Point(left + 105, top), _rect_color, -1);
-        putText(input_image, label, Point(left, top -11 + label_size.height), cfp._face, cfp._scale, BLACK, cfp._thickness);
+        putText(input_image, label, Point(left, top -11 + label_size.height), cfp.face, cfp.scale, BLACK, cfp.thickness);
     }
 }
 
+
+//認識ごとのデータを整理するための構造体
+struct DetctionData
+{
+    float cx;
+    float cy;
+    // Box dimension.
+    float w;
+    float h;
+    // Bounding box coordinates.
+    int left;
+    int top;
+    int width;
+    int height;
+
+};
+
+//認識ごとのデータを整理するための構造体
+struct DetectedObject
+{
+    cv::Rect bbox; // バウンディングボックス
+
+    float cx;
+    float cy;
+    // Box dimension.
+    float w;
+    float h;
+
+    float confidence; // 信頼度スコア
+    int classID; // クラスID
+    int objectID;
+
+    DetectedObject();
+    DetectedObject(
+        float _cx,
+        float _cy,
+        float _w,
+        float _h,
+        cv::Rect bbox, // バウンディングボックス
+        float confidence, // 信頼度スコア
+        int classID, // クラスID
+        int objectID
+    );
+};
+
+DetectedObject::DetectedObject()
+{
+    cx=0.0;
+    cy=0.0;
+    w=0.0;
+    h=0.0;
+    confidence = 0.0;
+    classID = 0;
+    objectID = 0;
+    bbox = cv::Rect(0, 0, 0, 0);
+}
+DetectedObject::DetectedObject
+(
+    float _cx,
+    float _cy,
+    float _w,
+    float _h,
+    cv::Rect _bbox,      // バウンディングボックス
+    float _confidence,   // 信頼度スコア
+    int _classID,        // クラスID
+    int _objectID
+)
+{
+    cx = _cx;
+    cy = _cy;
+    w = _w;
+    h = _h;
+    confidence = _confidence;
+    classID = _classID;
+    objectID = _objectID;
+    bbox = _bbox;
+}
+
+//テスト中
+int extract_object_data(
+    vector<Mat>& _outputs, 
+    const vector<string>& class_name, 
+    vector<DetectedObject>& _objects, 
+    int yolo_version,
+    float _confidence_thresgold,
+    float _x_factor, 
+    float _y_factor
+)
+{
+    int rows = 0;
+    int dimensions = 0;
+    float* _data = nullptr;
+
+    if (yolo_version == YOLOV8)
+    { 
+        //https://github.com/ultralytics/ultralytics/issues/1852
+        rows = _outputs[0].size[2];
+        dimensions = _outputs[0].size[1];
+        _outputs[0] = _outputs[0].reshape(1, dimensions);
+        cv::transpose(_outputs[0], _outputs[0]);
+        float* data = (float*)_outputs[0].data; //データ領域のポインタかな???
+        
+        for (int i = 0; i < rows; ++i)
+        {
+            DetectedObject _obj;    //一時データ置き場
+
+            float* classes_scores = data + 4;
+            cv::Mat scores(1, (int)class_name.size(), CV_32FC1, classes_scores);
+            cv::Point class_id;
+            double maxClassScore;
+            minMaxLoc(scores, 0, &maxClassScore, 0, &class_id);
+
+            if (maxClassScore > _confidence_thresgold)
+            {
+                //confidences.push_back((float));
+                //class_ids.push_back(class_id.x);
+                _obj.classID = class_id.x;
+                _obj.confidence = maxClassScore;
+                _obj.cx = data[0];
+                _obj.cy = data[1];
+                _obj.w = data[2];
+                _obj.h = data[3];
+
+                //イメージの大きさに合わせてバウンディングボックスの値をセットする
+                _obj.bbox.x = int((_obj.cx - 0.5 * _obj.w) * _x_factor);
+                _obj.bbox.y = int((_obj.cy - 0.5 * _obj.h) * _y_factor);
+                _obj.bbox.width = int(_obj.w * _x_factor);
+                _obj.bbox.height = int(_obj.h * _y_factor);
+
+                _objects.push_back(_obj);
+            }
+            data += dimensions;
+        }
+    }
+    else if (yolo_version == YOLOV5)
+    {
+        rows = _outputs[0].size[1]; //検出したオブジェクトの数?
+        dimensions = _outputs[0].size[2]; //何だこれ? 各オブジェクトの要素数
+        float* _data = (float*)_outputs[0].data; //データ領域のポインタかな???
+
+        for (int i = 0; i < rows; ++i)
+        {
+            DetectedObject _obj;    //一時データ置き場
+            _obj.confidence = _data[4];
+            if (_obj.confidence >= _confidence_thresgold)
+            {
+                float* _classes_scores = _data + 5;
+                Mat scores(1, (int)class_name.size(), CV_32FC1, _classes_scores);
+                cv::Point class_id;
+                double maxClassScore;
+                minMaxLoc(scores, 0, &maxClassScore, 0, &class_id);
+                _obj.classID = class_id.x;
+
+                _obj.confidence = _data[4];
+                _obj.cx = _data[0];
+                _obj.cy = _data[1];
+                _obj.w = _data[2];
+                _obj.h = _data[3];
+
+                //イメージの大きさに合わせてバウンディングボックスの値をセットする
+                _obj.bbox.x = int((_obj.cx - 0.5 * _obj.w) * _x_factor);
+                _obj.bbox.y = int((_obj.cy - 0.5 * _obj.h) * _y_factor);
+                _obj.bbox.width = int(_obj.w * _x_factor);
+                _obj.bbox.height = int(_obj.h * _y_factor);
+
+                //_obj.bbox.x = max(_obj.bbox.x, 0);
+                //_obj.bbox.y = max(_obj.bbox.y, 0);
+
+                _objects.push_back(_obj);
+            }
+            _data += dimensions;
+        }
+    }
+
+    return 0;
+}
 
 //AIによる検知 アドレス値を受け取って格納する方法に変更
 int pre_process(vector<Mat>& outputs,Mat& input_image, Net& net, float input_width= DEFAULT_AI_INPUT_WIDTH, float input_height= DEFAULT_AI_INPUT_HEIGHT)
@@ -145,10 +288,10 @@ int pre_process(vector<Mat>& outputs,Mat& input_image, Net& net, float input_wid
     if (false)
     {
         //この関数の呼び出しもとでtryを入れている
-        _TRYCAT_CV_STD(blobFromImage(input_image, blob, 1. / 255., Size(input_width, input_height), Scalar(), true, false));
-        _TRYCAT_CV_STD(net.setInput(blob));
+        _TRYCAT(blobFromImage(input_image, blob, 1.0/255.0, Size((int)input_width, (int)input_height), Scalar(), true, false));
+        _TRYCAT(net.setInput(blob));
         // Forward propagate.
-        _TRYCAT_CV_STD(net.forward(outputs, net.getUnconnectedOutLayersNames()));
+        _TRYCAT(net.forward(outputs, net.getUnconnectedOutLayersNames()));
 
     }
    //こっちNULLチェック どっちがいいのやら
@@ -166,12 +309,20 @@ int pre_process(vector<Mat>& outputs,Mat& input_image, Net& net, float input_wid
         }
         else
         {
-            blobFromImage(input_image, blob, 1. / 255., Size(input_width, input_height), Scalar(), true, false);
+            ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+            //公式エラー報告あり
+            // https://github.com/opencv/opencv/issues/23977
+            // OpenCV CUDA ビルドを使用して ONNX モデルで検出を実行すると、YOLOv8 境界ボックスの寸法が 0 になる #23977
+            // https://github.com/ultralytics/ultralytics/issues/3682
+            // OpenCV 4.7.0だとうまくいくと報告あり
+            ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+            blobFromImage(input_image, blob, 1.0/255.0, Size((int)input_width, (int)input_height), Scalar(), true, false);
             net.setInput(blob);
             // Forward propagate.
-            //_LOGMSG2("outputs1", outputs);
+            //LOGMSG2("outputs1", outputs);
+            //TRYCAT(net.forward(outputs, net.getUnconnectedOutLayersNames()));
             net.forward(outputs, net.getUnconnectedOutLayersNames());
-            //_LOGMSG2("outputs2", outputs);
+            //LOGMSG2("outputs2", outputs);
             ret = 0;
         }
     }    
@@ -180,7 +331,6 @@ int pre_process(vector<Mat>& outputs,Mat& input_image, Net& net, float input_wid
 
 //指示したオブジェクトだけを表示する場合はfalseにする
 #define VIEW_ALL true 
-
 //AIの結果をストリームに出力する
 //描画機能は省いた 
 //いずれpost_processと統合したほうがいい
@@ -197,7 +347,8 @@ Mat post_process_str(
     const vector<string>& class_name,
     int& number_of_persons, std::vector<std::string>& class_list_view, 
     std::string _header,            //日付等
-    std::string& _ost               //書き込んだ文字列を返す時の格納場所
+    std::string& _ost,               //書き込んだ文字列を返す時の格納場所
+    int _version                //yoloのバージョン
 )
 {
     //何も検出していなければそのまま返す
@@ -206,34 +357,59 @@ Mat post_process_str(
 
     cv::Mat output_image = input_image;
 
+#ifdef _DEBUG
+    if (1)
+    {
+        //関数の中でトランスフォームするので一時データにコピー
+        vector<Mat> _tmp_outputs = outputs;
+        vector<DetectedObject> _objects;
+        extract_object_data(_tmp_outputs, class_name, _objects, yp.yolo_version, yp.score_threshold, input_image.cols / yp.input_width, input_image.rows / yp.input_height);
+    }
+#endif
+
+    //std::vector<DetectedObject> _detections;
+    //_detections=convertDetections(outputs, yp._confidence_thresgold );
+
+
     // Initialize vectors to hold respective outputs while unwrapping     detections.
     vector<int> class_ids;
     vector<float> confidences;
     vector<Rect> boxes;
     // Resizing factor. 要素のリサイズ
-    float x_factor = input_image.cols / yp._input_width;
-    float y_factor = input_image.rows / yp._input_height;
+    float x_factor = input_image.cols / yp.input_width;
+    float y_factor = input_image.rows / yp.input_height;
 
-    int rows = outputs[0].size[1];
-    int dimensions = outputs[0].size[2];
+    int rows = outputs[0].size[1]; //検出したオブジェクトの数?
+    int dimensions = outputs[0].size[2]; //何だこれ? 各オブジェクトの要素数
     bool yolov8 = false;
+
     // yolov5 has an output of shape (batchSize, 25200, 85) (Num classes + box[x,y,w,h] + confidence[c])
     // yolov8 has an output of shape (batchSize, 84,  8400) (Num classes + box[x,y,w,h])
-    if (dimensions > rows) // Check if the shape[2] is more than shape[1] (yolov8)
+    if (0)
     {
-        yolov8 = true;
-        rows = outputs[0].size[2];
-        dimensions = outputs[0].size[1];
+        if (dimensions > rows) // Check if the shape[2] is more than shape[1] (yolov8) gpuの場合は成り立たない
+        {
+            yolov8 = true;
+            rows = outputs[0].size[2];
+            dimensions = outputs[0].size[1];
 
-        outputs[0] = outputs[0].reshape(1, dimensions);
-        cv::transpose(outputs[0], outputs[0]);
+            outputs[0] = outputs[0].reshape(1, dimensions);
+            cv::transpose(outputs[0], outputs[0]);
+        }
+        float* data = (float*)outputs[0].data; //データ領域のポインタかな???
     }
-    float* data = (float*)outputs[0].data;
     // 25200 for default size 640.
     // Iterate through 25200 detections.
-    for (volatile int i = 0; i < rows; ++i)
+    if (_version == YOLOV8)
     {
-        if (yolov8)
+        //https://github.com/ultralytics/ultralytics/issues/1852
+        rows = outputs[0].size[2];
+        dimensions = outputs[0].size[1];
+        outputs[0] = outputs[0].reshape(1, dimensions);
+        cv::transpose(outputs[0], outputs[0]);
+
+        float* data = (float*)outputs[0].data; //データ領域のポインタかな???
+        for (int i = 0; i < rows; ++i)
         {
             float* classes_scores = data + 4;
 
@@ -243,9 +419,9 @@ Mat post_process_str(
 
             minMaxLoc(scores, 0, &maxClassScore, 0, &class_id);
 
-            if (maxClassScore > yp._score_threshold)
+            if (maxClassScore > yp.score_threshold)
             {
-                confidences.push_back(maxClassScore);
+                confidences.push_back((float)maxClassScore);
                 class_ids.push_back(class_id.x);
 
                 float x = data[0];
@@ -261,13 +437,18 @@ Mat post_process_str(
 
                 boxes.push_back(cv::Rect(left, top, width, height));
             }
+            data += dimensions;
         }
-        //yolov5
-        else
+    }
+    else if(_version == YOLOV5)//yolov5
+    {
+        float* data = (float*)outputs[0].data; //データ領域のポインタかな???
+        for (int i = 0; i < rows; ++i)
         {
+            //yolov5
             float confidence = data[4];
             // Discard bad detections and continue.
-            if (confidence >= yp._confidence_thresgold)
+            if (confidence >= yp.confidence_thresgold)
             {
                 float* classes_scores = data + 5;
                 // Create a 1x85 Mat and store class scores of 80 classes.
@@ -277,7 +458,7 @@ Mat post_process_str(
                 double max_class_score;
                 minMaxLoc(scores, 0, &max_class_score, 0, &class_id);
                 // Continue if the class score is above the threshold.
-                if (max_class_score > yp._score_threshold)
+                if (max_class_score > yp.score_threshold)
                 {
                     // Store class ID and confidence in the pre-defined respective vectors.
                     confidences.push_back(confidence);
@@ -297,16 +478,16 @@ Mat post_process_str(
                     boxes.push_back(Rect(left, top, width, height));
                 }
             }
+            data += dimensions;
         }
-        data += dimensions;
     }
-
     ostringstream _os;
     Scalar RECTCOLOR;
     //囲う四角を描画
     vector<int> indices;
     //cudnnの関数
-    cv::dnn::NMSBoxes(boxes, confidences, yp._score_threshold, yp._nms_threshold, indices);
+    //検出した物体の重なり具合から同一性を判断し抽出する関数 indicesに抽出したidの配列が入れられる
+    cv::dnn::NMSBoxes(boxes, confidences, yp.score_threshold, yp.nms_threshold, indices);
     number_of_persons = 0;
     for (int i = 0; i < indices.size(); i++)
     {
@@ -332,6 +513,7 @@ Mat post_process_str(
             count_class_list_view++;
         }
 
+        //追加した処理　オブジェクトによって数えたり色を変えたり
         //人だったら数える
         if (object_name.compare("person") == 0 ||
             object_name.compare("driver") == 0)
@@ -356,16 +538,15 @@ Mat post_process_str(
         if (draw_image && draw_rect) //データ書き込みのみの場合は描画はしない
         {
             // Draw bounding box.
-            rectangle(output_image, Point(left, top), Point(left + width, top + height), RECTCOLOR, yfp._thickness_box);
+            rectangle(output_image, Point(left, top), Point(left + width, top + height), RECTCOLOR, yfp.thickness_box);
             // Get the label for the class name and its confidence.
             string label = format("%.2f", confidences[idx]);
             label = class_name[class_ids[idx]] + ":" + label;
             // Draw class labels.
-            draw_label(output_image, label, left, top,yfp._label, RECTCOLOR);
+            draw_label(output_image, label, left, top, yfp.label, RECTCOLOR);
         }
-
         
-        //ストリームに解析した結果を保存
+        //追加した処理　ストリームに解析した結果を保存
         _os << _header << ","
             << i << ","
             << indices.size() << ","
@@ -373,17 +554,17 @@ Mat post_process_str(
             << class_ids[idx] << ","
             << confidences[idx] << ","
             << class_name[class_ids[idx]] << ","
-            << yp._score_threshold << ","
-            << yp._nms_threshold << ","
-            << yp._confidence_thresgold << ","
+            << yp.score_threshold << ","
+            << yp.nms_threshold << ","
+            << yp.confidence_thresgold << ","
             << left << ","
             << top << ","
             << (left + width) << ","
             << (top + height) << ","
             << width << ","
             << height << ","
-            << yp._onnx_file_name << ","
-            << yp._names_file_name << ","
+            << yp.onnx_file_name << ","
+            << yp.names_file_name << ","
             << input_image.cols << ","
             << input_image.rows << endl;
 
@@ -391,112 +572,80 @@ Mat post_process_str(
     _ost = _os.str().c_str();
     return input_image;
 }
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 YoloObjectDetection::YoloObjectDetection()
 {
-    _YP._input_width = DEFAULT_AI_INPUT_WIDTH;
-    _YP._input_height = DEFAULT_AI_INPUT_HEIGHT;
+    YP.yolo_version = YOLOV5;
+    YP.input_width = DEFAULT_AI_INPUT_WIDTH;
+    YP.input_height = DEFAULT_AI_INPUT_HEIGHT;
+    YP.score_threshold = (float)DEFAULT_SCORE_THRESHOLD;
+    YP.nms_threshold = (float)DEFAULT_NMS_THRESHOLD;
+    YP.confidence_thresgold = (float)DEFAULT_CONF_THRESHOLD;
 
-    _YP._score_threshold = (float)DEFAULT_SCORE_THRESHOLD;
-    _YP._nms_threshold = (float)DEFAULT_NMS_THRESHOLD;
-    _YP._confidence_thresgold = (float)DEFAULT_CONF_THRESHOLD;
+    YFP.label.scale      = (float)FONT_SCALE_LABEL;
+    YFP.label.face       = FONT_FACE_LABEL;
+    YFP.label.thickness  = THICKNESS_FONT_LABEL;
 
-    _YFP._label._scale      = (float)FONT_SCALE_LABEL;
-    _YFP._label._face       = FONT_FACE_LABEL;
-    _YFP._label._thickness  = THICKNESS_FONT_LABEL;
+    YFP.person.scale       = (float)FONT_SCALE_PERSON;
+    YFP.person.face        = FONT_FACE_PERSON;
+    YFP.person.thickness   = THICKNESS_FONT_PERSON;
 
-    _YFP._person._scale       = (float)FONT_SCALE_PERSON;
-    _YFP._person._face        = FONT_FACE_PERSON;
-    _YFP._person._thickness   = THICKNESS_FONT_PERSON;
+    YFP.time.scale        = (float)FONT_SCALE_TIME;
+    YFP.time.face         = FONT_FACE_TIME;
+    YFP.time.thickness    = THICKNESS_FONT_TIME;
 
-    _YFP._time._scale        = (float)FONT_SCALE_TIME;
-    _YFP._time._face         = FONT_FACE_TIME;
-    _YFP._time._thickness    = THICKNESS_FONT_TIME;
-
-    _YFP._thickness_box = THICKNESS_BOX;
+    YFP.thickness_box = THICKNESS_BOX;
 }
 
-//TR A2CW(const char* str)
-//{
-//    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
-//    return converter.from_bytes(str).c_str();
-//}
-//std::wstring A2CW(const std::string& ascii)
-LPCWSTR _A2CW(const std::string& ascii)
-{
-    int len = MultiByteToWideChar(CP_ACP, 0, ascii.c_str(), -1, NULL, 0);
-    if (len == 0) {
-        // Handle the error
-        return L"";
-    }
-
-    std::wstring wide(len, L'\0');
-    if (!MultiByteToWideChar(CP_ACP, 0, ascii.c_str(), -1, &wide[0], len)) {
-        // Handle the error
-        return L"";
-    }
-
-    return wide.c_str();
-}
-
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //AIの初期化
 //識別名リストとonnxファイルを読み込む
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //int YoloObjectDetection::init_yolov5(
 //    string filepath_of_names, 
 //    string filepath_of_onnx,
 //    //int clssification_size, 
 //    float _iw, float _ih, float _sc_th,float _nms_th, float _conf_th, 
-//    bool __count_of_person, 
+//    bool _count_of_person, 
 //    bool __count_of_time)
 //GPUデバイスを選択するときは、cuda_runtime.hをインクルードして、cudaSetDevice(int device)を指定する。
 //#include <cuda_runtime.h>
 //cudaSetDevice(0);
-int YoloObjectDetection::init_yolov5(YoloAIParametors yp, bool __count_of_person, bool __count_of_time)
+int YoloObjectDetection::init_yolov5(YoloAIParametors yp, bool _count_of_person, bool __count_of_time)
 {
     //USES_CONVERSION;
-    _YP = yp;
-    //_YP._input_width = _iw;
-    //_YP._input_height = _ih;
-    //_YP._score_threshold = _sc_th;
-    //_YP._nms_threshold = _nms_th;
-    //_YP._confidence_thresgold = _conf_th;
-    //_YP._names_file_name = filepath_of_names;
-    //_YP._onnx_file_name = filepath_of_onnx;
+    YP = yp;
 
-    _count_of_person = __count_of_person;
-    _count_of_time = __count_of_time;
+    count_of_person = _count_of_person;
+    count_of_time = __count_of_time;
 
-    //_clssification_size = clssification_size;
-
-    ifstream ifs(_YP._names_file_name);
+    ifstream ifs(YP.names_file_name);
     string line;
 
     //wostringstream _msg;
     ostringstream _msg;
-    _msg << "names: " << _YP._names_file_name << std::endl
-        << "onnx: " << _YP._onnx_file_name << std::endl
-        << "input width: " << _YP._input_width << std::endl
-        << "input height: " << _YP._input_height << std::endl;
-    LPCWSTR _lpcmsg = _A2CW(_msg.str().c_str());
-    //LPCWSTR _lpcmsg = _msg.str().c_str();
+    _msg << "names: " << YP.names_file_name << std::endl
+        << "onnx: " << YP.onnx_file_name << std::endl
+        << "input width: " << YP.input_width << std::endl
+        << "input height: " << YP.input_height << std::endl;
 
-    _list_of_class.clear();
-    _YP._clssification_size = 0;
+    std::wstring _wsmsg = _A2CW(_msg.str().c_str());
+
+    list_of_class.clear();
+    YP.clssification_size = 0;
     while (getline(ifs, line))
     {
         //ファイルからclassificationの名を読み込む
-        _list_of_class.push_back(line);
-        ++_YP._clssification_size;
+        list_of_class.push_back(line);
+        ++YP.clssification_size;
     }
      // Load model. yolov8だとreadNetまたはreadNetFromONNXでエラーが出る
     try
     {
         //cudaSetDevice(0);
-        _LOGMSG("dnn::readNetFromONNX:" <<_YP._onnx_file_name);
-        net=cv::dnn::readNetFromONNX(_YP._onnx_file_name);
+        LOGMSG("dnn::readNetFromONNX:" <<YP.onnx_file_name);
+        net = cv::dnn::readNetFromONNX(YP.onnx_file_name);
+        //net = cv::dnn::readNet(YP.onnx_file_name);
 
 #ifdef _CUDA
         net.setPreferableBackend(DNN_BACKEND_CUDA);
@@ -512,8 +661,8 @@ int YoloObjectDetection::init_yolov5(YoloAIParametors yp, bool __count_of_person
     catch (const cv::Exception& e)
     {
         const char* err_msg = e.what();
-        _LOGMSG(err_msg);
-        int id = MessageBox(0, _lpcmsg, L"AI ONNX read file error", MB_OK);
+        LOGMSG(err_msg);
+        int id = MessageBox(0, _wsmsg.c_str(), L"AI ONNX read file error", MB_OK);
         //int id = MessageBoxW(0, A2CW(err_msg), L"AI ONNX read file error", MB_OK);
         return 0;
     }
@@ -521,14 +670,13 @@ int YoloObjectDetection::init_yolov5(YoloAIParametors yp, bool __count_of_person
     return 1;
 }
 
+
 vector<Mat>& YoloObjectDetection::_pre_process(Mat& input_image)
 {
-    //vector<Mat> _detections;     // Process the image.
-
     if (input_image.empty() || input_image.data == NULL || input_image.cols == 0; input_image.rows == 0)
         return detections;
 
-    pre_process(detections, input_image, net, _YP._input_width, _YP._input_height);
+    pre_process(detections, input_image, net, YP.input_width, YP.input_height);
 
     //TRYCAT_CV_STD(detections = pre_process(input_image, net, _input_width, _input_height));
 
@@ -548,26 +696,27 @@ cv::Mat YoloObjectDetection::_post_process(
     number_of_persons = 0;
 
     img = post_process_str(
-        _YP,
-        _YFP,
+        YP,
+        YFP,
         draw_image,
         input_image.clone(), //元イメージ
         detections,
-        _list_of_class,         //ファイルから読み込んだ分類名のリスト
+        list_of_class,         //ファイルから読み込んだ分類名のリスト
         number_of_persons, class_list_view,
         _header,            //日付等
-        _ost               //書き込んだ文字列を返す時の格納場所
-    );
+        _ost,              //書き込んだ文字列を返す時の格納場所
+        YP.yolo_version
+        );
 
     string label = format("Count of Persons = %i ", number_of_persons);
     //たまにnullポインターが発生する。原因は不明。
     if (img.data!=NULL)
     {
-        putText(img, label, TEXT_POINT_PERSON, _YFP._person._face, _YFP._person._scale, BLACK, _YFP._person._thickness + 1);
-        putText(img, label, TEXT_POINT_PERSON, _YFP._person._face, _YFP._person._scale, BLUE, _YFP._person._thickness);
+        putText(img, label, TEXT_POINT_PERSON, YFP.person.face, YFP.person.scale, BLACK, YFP.person.thickness + 1);
+        putText(img, label, TEXT_POINT_PERSON, YFP.person.face, YFP.person.scale, BLUE, YFP.person.thickness);
          
         ostringstream _os;
-        _os << "AI:" << _YP._onnx_file_name;
+        _os << "AI:" << YP.onnx_file_name;
     }
     else
     {
@@ -575,13 +724,13 @@ cv::Mat YoloObjectDetection::_post_process(
     }
 
     //処理時間の表示
-    if (_count_of_time)
+    if (count_of_time)
     {
         vector<double> layersTimes;
         double freq = getTickFrequency() / 1000;
         double t = net.getPerfProfile(layersTimes) / freq;
         string label = format("Inference time = %.2f ms", t);
-        putText(img, label, Point(20, 40), _YFP._time._face, _YFP._time._scale, RED, _YFP._time._thickness);
+        putText(img, label, Point(20, 40), YFP.time.face, YFP.time.scale, RED, YFP.time.thickness);
     }
     return img;
 }

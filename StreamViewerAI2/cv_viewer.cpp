@@ -1,15 +1,12 @@
 
 #include "stdafx.h"
 
-//#include <vector>
-//#include <atltypes.h>
-//#include <thread>
-//#include <opencv2\opencv.hpp>
-
 #include "framework.h"
-#include "StreamVierwer.h"
+#include "mylib.h"
 #include "yolov5_engine.h"
 #include "logfile.h"
+#include "pose.h"
+#include "StreamVierwer.h"
 
 #define DRAW_ALL 0
 #define DRAW_UPLEFT 1
@@ -21,24 +18,29 @@
 #define INIT_FPS_MSEC 33 //1500
 #define INIT_INTERVAL_TIME_SEC 30 //8
 
-//drawing_position 0:全部 1:左上 2:右上 3:右下 4:左下
-//volatile int cvw_status = 0;
-volatile bool cvw_stop = true;
-volatile bool cvw_set_stop = false;
-volatile bool cvw_file_processing = false;
-volatile bool cvw_file_end = false;
+std::atomic<bool> cvw_stop = true;
+std::atomic<bool> cvw_set_stop = false;
+std::atomic<bool> cvw_file_processing = false;
+std::atomic<bool> cvw_file_end = false;
 
-volatile int display_time_seconds = INIT_INTERVAL_TIME_SEC;// 8;
-volatile int sleep = INIT_FPS_MSEC;// 100;
-extern bool _ai_text_output=false;
-volatile bool _next_source = false; //次の画面に行く
-volatile bool _drawing_flag = false; //AIの演算が重なるのを防ぐ
-std::vector<std::vector<std::string>> cam_urls; //[0]にはタイトル、[1]にはurlが入っている
+//volatile int display_time_seconds = INIT_INTERVAL_TIME_SEC;// 8;
+std::atomic<int>  display_time_seconds = INIT_INTERVAL_TIME_SEC;// 8;
+std::atomic<int>  fram_interval_ms = INIT_FPS_MSEC;// 100 sleep
+std::atomic<bool> ai_text_output=false;
+std::atomic<bool> Next_source = false; //次の画面に行く
+std::atomic<bool> drawing_flag=false; //AIの演算が重なるのを防ぐ
 
-volatile bool _VIDEO_REC = false;
-volatile bool _VIDEO_RECODING = false;
 
-int DrawPicToHDC(cv::Mat cvImg, HWND hWnd, HDC hDC, bool bMaintainAspectRatio, int drawing_position); //bMaintainAspectRatio=true
+int capture_error_count = 0;
+#define CAPTURE_ERRROR_COUNT_MAX 0
+
+#define CAPTURE_WAIT_TIME 10
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+std::mutex Mutex_DrawCycle_Ai;
+
+my_video_writer mvw_org;	//入力画像の録画クラス
+my_video_writer mvw_ai;		//AI画像の録画クラス
 
 int set_display_time_seconds(int _display_time_seconds)
 {
@@ -46,12 +48,20 @@ int set_display_time_seconds(int _display_time_seconds)
 	return display_time_seconds;
 }
 
-int set_frame_between_time(int _sleep)
+int get_display_time_seconds()
 {
-	sleep = _sleep;
-	return sleep;
+	return display_time_seconds;
 }
 
+int set_frame_between_time(int _sleep)
+{
+	fram_interval_ms = _sleep;
+	return fram_interval_ms;
+}
+int get_frame_between_time()
+{
+	return fram_interval_ms;
+}
 bool get_cvw_stop()
 {
 	return cvw_stop;
@@ -66,50 +76,36 @@ bool svw_wait_stop()
 	return get_cvw_stop();
 }
 
-int set_score_threshold(float _st, void* __pt_yod)
+int set_score_threshold(float _st, void* _pt_YoloObjectDetection)
 {
 	//明示的にキャスト 
-	YoloObjectDetection* _pt_yod = (YoloObjectDetection*)__pt_yod;
-	if (_pt_yod == nullptr)
+	YoloObjectDetection* pt_YoloObjectDetection = (YoloObjectDetection*)_pt_YoloObjectDetection;
+	if (pt_YoloObjectDetection == nullptr)
 		return -1;
 	else
-		_pt_yod->_YP._score_threshold = _st;
+		pt_YoloObjectDetection->YP.score_threshold = _st;
 	return 0;
 }
-int set_nms_threshold(float _nms, void* __pt_yod)
+int set_nms_threshold(float _nms, void* _pt_YoloObjectDetection)
 {
 	//明示的にキャスト 
-	YoloObjectDetection* _pt_yod = (YoloObjectDetection*)__pt_yod;
-	if (_pt_yod == nullptr)
+	YoloObjectDetection* pt_YoloObjectDetection = (YoloObjectDetection*)_pt_YoloObjectDetection;
+	if (pt_YoloObjectDetection == nullptr)
 		return -1;
 	else
-		_pt_yod->_YP._nms_threshold = _nms;
-	return 0;
-}
-
-int set_conf_threshold(float _conf, void* __pt_yod)
-{
-	//明示的にキャスト 
-	YoloObjectDetection* _pt_yod = (YoloObjectDetection*)__pt_yod;
-	if (_pt_yod == nullptr)
-		return -1;
-	else
-		_pt_yod->_YP._confidence_thresgold = _conf;
+		pt_YoloObjectDetection->YP.nms_threshold = _nms;
 	return 0;
 }
 
-
-void DoEvents(int n)
+int set_conf_threshold(float _conf, void* _pt_YoloObjectDetection)
 {
-	MSG msg;
-	for (int i = 0; i < n; i++)
-	{
-		while (::PeekMessage(&msg, NULL, NULL, NULL, PM_NOREMOVE))
-		{
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-	}
+	//明示的にキャスト 
+	YoloObjectDetection* pt_YoloObjectDetection = (YoloObjectDetection*)_pt_YoloObjectDetection;
+	if (pt_YoloObjectDetection == nullptr)
+		return -1;
+	else
+		pt_YoloObjectDetection->YP.confidence_thresgold = _conf;
+	return 0;
 }
 
 //trueでストップ
@@ -119,418 +115,604 @@ bool set_cvw_stop(bool _cvw_set_stop)
 	return cvw_set_stop;
 }
 
-std::wstring stringToWstring(const std::string& s) 
-{
-	int requiredSize = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, NULL, 0);
-	std::wstring result(requiredSize, 0);
-	//MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &result[0], requiredSize);
-	MultiByteToWideChar(CP_ACP, 0, s.c_str(), -1, &result[0], requiredSize);
-	return result;
-}
-
-//HDCをやたらゲットするとおかしくなるので生成しない
-int AllPaintBlack(HWND hWnd, HDC hDC)
-{
-	//画面を黒く塗りつぶす
-	CRect rect;
-	GetClientRect(hWnd, rect);
-	HBRUSH hBrush = CreateSolidBrush(RGB(0, 0, 0));
-	FillRect(hDC, &rect, hBrush);
-	DeleteObject(hBrush);
-
-	return 0;
-}
-
-int MyDrawText(HWND hWnd, HDC hDC, std::string& _text,int x0=0, int y0=0, bool _add = false)
-{
-	//HDC hDC = ::GetDC(hWnd);
-	RECT rect;
-	GetClientRect(hWnd, &rect);
-	rect.left = x0;
-	rect.top = y0;
-
-	std::string _text_tmp;
-
-	//行数をカウント
-	int lineCount = std::count(_text.begin(), _text.end(), '\n') + 1;
-	int n = (rect.bottom - rect.top) / 8 /2;
-	//if (lineCount * 8 > (rect.bottom - rect.top))
-	//画面をはみ出るようだったら、文字列を削除
-	if (lineCount > n)
-	{
-		size_t pos = 0;
-		for (int i = 0; i < n; ++i) {
-			pos = _text.find('\n', pos);
-			if (pos == std::string::npos) {
-				break;
-			}
-			++pos;
-		}
-		// 最初のn行を削除
-		_text_tmp = _text.substr(pos);
-
-		AllPaintBlack(hWnd, hDC);
-	}
-	else
-		_text_tmp = _text;
-
-	//結局代入するなら_text_tmp要らなかったね。
-	_text = _text_tmp;
-
-	HFONT hFont = CreateFont(
-		-MulDiv(8, GetDeviceCaps(hDC, LOGPIXELSY), 72),    // フォントの高さ（ピクセル単位）
-		0,                                                  // 平均文字幅
-		0,                                                  // 回転角度
-		0,                                                  // ベースラインとx軸との角度
-		FW_BOLD,                                             // フォントの重さ（太さ）
-		FALSE,                                               // イタリック
-		FALSE,                                               // 下線
-		FALSE,                                               // 取り消し線
-		DEFAULT_CHARSET,                                     // 文字セット
-		OUT_DEFAULT_PRECIS,                                  // 出力精度
-		CLIP_DEFAULT_PRECIS,                                 // クリッピング精度
-		DEFAULT_QUALITY,                                     // 出力品質
-		DEFAULT_PITCH | FF_SWISS,                            // ピッチとファミリー
-		_T("Meiryo UI")                                      // フォント名
-	);
-	HFONT hOldFont = (HFONT)SelectObject(hDC, hFont);
-
-	SetBkMode(hDC, TRANSPARENT); // テキストの背景を透明にします。
-	SetTextColor(hDC, RGB(255, 255, 255)); // テキストの色を白にします。
-
-	std::wstring _ostW = stringToWstring(_text_tmp);
-	DrawText(hDC, _ostW.c_str(), -1, &rect, DT_LEFT | DT_TOP | DT_WORDBREAK);
-
-	// 使用が終わった後、オブジェクトを選択解除し、削除します
-	SelectObject(hDC, hOldFont);
-	DeleteObject(hFont);
-
-	return 0;
-}
-
-/*
-void DoEvents()
-{
-	// メッセージループを実行してイベントを処理
-	MSG msg;
-	while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
-	}
-}
-*/
-
 void wait_drawing()
 {
-	while (_drawing_flag)
+	while (drawing_flag)
 	{
 		DoEvents();
 	}
 }
 
-//my_video_writer::my_video_writer(std::string _fname)
-my_video_writer::my_video_writer(const char* _fname)
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 0 正常
+// 1 キャプチャー画像の異常
+int DrawCycle_Core_Yolo(
+	int _DrawCycleMode,
+	HWND hWnd,
+	HDC hDC,
+	DrawArea _draw_area,
+	bool _keep_aspect,
+	//cv::VideoCapture& _capture,
+	cv::VideoCapture* _pt_capture,
+	YoloObjectDetection* _pt_YoloObjectDetection,
+//	PoseNet* _pt_pose,
+	const std::string& _str_source1,
+	const std::string& _str_source2,
+	std::string& _ai_out_put_string,
+	std::ofstream* _pAICSV
+//	int _display_time_seconds
+)
 {
-	//output.open(filename.c_str(), fourcc, fps, cv::Size(width, height));
-	//open(_fname);
-	my_video_writer();
-	filename = _fname;
-}
-my_video_writer::my_video_writer()
-{
-	fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
-	//fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
-	//fourcc = cv::VideoWriter::fourcc('X', 'V', 'I', 'D');
-	fps = 30; //動画からfpsを取得
-	width = 720; //動画から幅を取得
-	height = 480; //動画から高さを取得
-	filename = "output.mp4";
-	//my_video_writer("output.mp4");
-}
+	//必要なMat
+	cv::Mat image_input;
+	cv::Mat image_resized;
+	cv::Mat image_post_proccesed;
 
-int my_video_writer::open(const char* _fname)
-{
-	filename = _fname;
-	//output.open(filename.c_str(), fourcc, fps, cv::Size(width, height));
-	//return 0;
-	return open();
-}
+	//CSV出力
+	std::string _ost;
+	std::ostringstream _header;
 
-int my_video_writer::open()
-{
-	if (_VIDEO_REC == false)
+	if (_pt_YoloObjectDetection == nullptr)
 	{
-		output.open(filename.c_str(), fourcc, fps, cv::Size(width, height));
-		_VIDEO_REC = true;
+		return 1;
+	}
+
+	//排他処理 他のスレッドが終わるまで待つ
+	while (Mutex_DrawCycle_Ai.try_lock() == false)
+	{
+		DoEvents();
+		Sleep(CAPTURE_WAIT_TIME);
+	}
+
+	//画像のリード
+	_pt_capture->read(image_input);
+	//TRYCAT( _capture.read(image_input));
+
+	//画像データに異常があれば以下の処理を飛ばす
+	if (image_input.empty() || image_input.rows == 0 || image_input.cols == 0)
+	{
+		Mutex_DrawCycle_Ai.unlock();
+		return 1;
+	}
+
+	//ここでリサイズ
+	cv::resize(
+		image_input,
+		image_resized,
+		cv::Size(),
+		(double)_pt_YoloObjectDetection->YP.input_width / image_input.cols,
+		(double)_pt_YoloObjectDetection->YP.input_height / image_input.rows);
+
+	_header << "AI,\"" << _str_source1 << "\"," << _str_source2 << "," << TimeStumpStr();
+	//AIの処理
+	_pt_YoloObjectDetection->_pre_process(image_resized);
+	image_post_proccesed = _pt_YoloObjectDetection->_post_process(true, image_input.clone(), _header.str().c_str(), _ost);
+
+	Mutex_DrawCycle_Ai.unlock();
+
+	mvw_ai.write(image_post_proccesed);
+
+	//描画
+	rec_stump(image_post_proccesed, mvw_ai.output.isOpened());
+	DrawPicToHDC(image_post_proccesed, hWnd, hDC, _keep_aspect, _draw_area);//アスペクト比を維持する。
+
+	///////////////////////////////////
+	//解析データの保存処理
+	_ai_out_put_string = _ai_out_put_string + "\n" + _ost;
+	if (ai_text_output)
+	{
+		//aiの出力をテキストで画面にバーっと出す。ターミネーター、のようにはならなかった。
+		MyDrawText(hWnd, hDC, _ai_out_put_string, 5, 50);
+	}
+
+	//AIの出力をテキストファイルに保存
+	if (_pAICSV != nullptr)
+	{
+		*_pAICSV << _ost;
+		_pAICSV->flush();
 	}
 	return 0;
 }
-
-int my_video_writer::write(cv::Mat& frame)
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 0 正常
+// 1 キャプチャー画像に異常がある
+int DrawCycle_Core_Pose(
+	int _DrawCycleMode,
+	HWND hWnd,
+	HDC hDC,
+	DrawArea _draw_area,
+	bool _keep_aspect,
+	//cv::VideoCapture& _capture,
+	cv::VideoCapture* _pt_capture,
+	//YoloObjectDetection* _pt_YoloObjectDetection,
+	PoseNet* _pt_pose
+	//const std::string& _str_source1,
+	//const std::string& _str_source2,
+	//std::string& _ai_out_put_string,
+	//std::ofstream* _pAICSV,
+	//int _display_time_seconds
+)
 {
-	if (_VIDEO_REC == true)
-	{	//cv::Mat frame_resized;
-		cv::resize(frame, frame_resized, cv::Size(), ((double)width / (double)frame.cols), ((double)height / (double)frame.rows));
-		output << frame_resized;
+	//必要なMat
+	cv::Mat image_input;
+	cv::Mat image_resized;
+	cv::Mat image_post_proccesed;
+	//cv::Mat image_input_gray;
+
+	while (Mutex_DrawCycle_Ai.try_lock() == false)
+	{
+		DoEvents();
+		Sleep(50);
 	}
+	//画像のリード
+	//TRYCAT(_capture.read(image_input));
+	TRYCAT(_pt_capture->read(image_input));
+	//cvtColor(image_input, image_input_gray, cv::COLOR_BGR2GRAY);
+
+	if (image_input.empty() || image_input.rows == 0 || image_input.cols == 0)
+	{
+		Mutex_DrawCycle_Ai.unlock();
+		return 1;
+	}
+	image_post_proccesed = _pt_pose->run_pose_multi(image_input, OUTPUT_IMAGE_MODE_GRAY); //中でTRYCATを呼んでいる
+	//image_post_proccesed = _pt_pose->run_pose_multi(image_input, OUTPUT_IMAGE_MODE_NORMAL); //中でTRYCATを呼んでいる
+	Mutex_DrawCycle_Ai.unlock();
+
+	mvw_ai.write(image_post_proccesed);
+	DrawPicToHDC(image_post_proccesed, hWnd, hDC, _keep_aspect, _draw_area, false);//アスペクト比を維持する。
+	//DrawPicToHDC(image_post_proccesed, hWnd, hDC, _keep_aspect, _draw_area, true);//アスペクト比を維持する。
+
 	return 0;
 }
-int my_video_writer::release()
+
+//1:サイクル　0:サイクルしない
+bool timer_cycle_mode=1;
+bool PROC_CYCLE(bool _mode)
 {
-	if (_VIDEO_REC == true)
-	{
-		output.release();
-		_VIDEO_REC = false;
-	}
-	return 0;
+	timer_cycle_mode = _mode;
+	return timer_cycle_mode;
 }
 
-my_video_writer _mvw_org;
-my_video_writer _mvw_ai;
-
-int  _rec_stump(cv::Mat& _image, bool rec, double _size=1.0)
+int fix_cam_number = -1;
+int PROC_FIX_CAM(int _cam_number)
 {
-	long _error = 0;
-	if (rec)
-	{
-		//cv::Size(_image);
-		int X1 = _image.cols - 70 * _size;
-		int Y1 = 26 * _size;
-
-		cv::putText(_image, "REC", cv::Point(X1, Y1), cv::FONT_HERSHEY_SIMPLEX, _size, cv::Scalar(0, 0, 255), 4* _size);
-	}
-	return 1;
+	fix_cam_number = _cam_number;
+	return fix_cam_number;
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+bool DrawCycle(
+	int _DrawCycleMode,
+	HWND hWnd,
+	HDC hDC,
+	DrawArea _draw_area,
+	bool _keep_aspect,
+	//cv::VideoCapture& _capture,
+	cv::VideoCapture* _pt_capture,
+	YoloObjectDetection* _pt_YoloObjectDetection,
+	PoseNet* _pt_pose,
+	const std::string& _str_source1,
+	const std::string& _str_source2,
+	std::string& _ai_out_put_string,
+	std::ofstream* _pAICSV,
+	int _display_time_seconds,
+	int _stump_mode
+)
+{
+	cv::Mat image_input;
+	cv::Mat image_resized;
+	cv::Mat image_post_proccesed;
 
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-int DrawCV2Window(
+	bool _next_source = Next_source; //次の画面に行く
+	auto _start = std::chrono::steady_clock::now();
+
+	LOGMSG(_str_source1);
+	LOGMSG(_str_source2);
+
+	bool _capture_success = true;
+	int _ret = 0;
+	
+	while (_capture_success)
+	{
+		if (_DrawCycleMode == DRAWCYCLE_YOLO5 || _DrawCycleMode == DRAWCYCLE_YOLO8)
+		{
+			_ret=DrawCycle_Core_Yolo(
+				_DrawCycleMode,
+				hWnd,
+				hDC,
+				_draw_area,
+				_keep_aspect,
+				//_capture,
+				_pt_capture,
+				_pt_YoloObjectDetection,
+				//	PoseNet* _pt_pose,
+				_str_source1,
+				_str_source2,
+				_ai_out_put_string,
+				_pAICSV
+				//	int _display_time_seconds
+			);
+			if (_ret)
+				break;
+		}
+		else if (_DrawCycleMode == DRAWCYCLE_POSENET) //pose
+		{
+			_ret = DrawCycle_Core_Pose(
+				_DrawCycleMode,
+				hWnd,
+				hDC,
+				_draw_area,
+				_keep_aspect,
+				//_capture,
+				_pt_capture,
+				//YoloObjectDetection* _pt_YoloObjectDetection,
+				_pt_pose
+				//const std::string& _str_source1,
+				//const std::string& _str_source2,
+				//std::string& _ai_out_put_string,
+				//std::ofstream* _pAICSV,
+				//int _display_time_seconds
+			);
+			if (_ret)
+				break;
+		}
+		else
+		{
+			//_capture >> image_input;
+			//*_pt_capture >> image_input;
+			_capture_success=_pt_capture->read(image_input);
+
+			if(_stump_mode & FLAG_TIMESTUMP)
+				time_stump(image_input,1.0);
+			mvw_org.write(image_input);
+			rec_stump(image_input, mvw_org.output.isOpened());
+			DrawPicToHDC(image_input, hWnd, hDC, _keep_aspect, _draw_area);//アスペクト比を維持する。
+			//DrawPicToHDC(image_input, hWnd, hDC, _keep_aspect, _spl_w, _spl_h, _num_w, _num_h);//アスペクト比を維持する。
+		}
+
+		////////////////////////////
+		//終了処理を優先する
+		if (cvw_set_stop == true)
+		{
+			LOGMSG2("cvw_set_stop==true", _str_source2);
+			break;
+		}
+
+		////////////////////////////
+		//タイマー 時間のチェック
+		auto _now = std::chrono::steady_clock::now();
+		if (std::chrono::duration_cast<std::chrono::seconds>(_now - _start).count() >= _display_time_seconds && _display_time_seconds != 0)
+			_next_source = true;
+		if (timer_cycle_mode == 0 || display_time_seconds==0)
+			_next_source = false; //次の画面に行かないようにする
+
+		////////////////////////////
+		//システムに処理を渡し、指定の時間スリープ
+		//切り替えの感じが不規則なので描画ルーチンより多めに回す
+		int _roop = 4;
+		for (int i = 0; i < _roop; i++)
+		{
+			DoEvents();
+			//Sleep(fram_interval_ms / _roop);
+			std::this_thread::sleep_for(std::chrono::milliseconds(fram_interval_ms)/ (float)_roop);
+		}
+
+		//グローバル変数をチェックし、スペースが押されていたら次のカメラに行く
+		//全画面でない場合は無視
+		//なんかもっといいアルゴリズムあるんじゃないの?
+		if (_draw_area.spl_w != 1 || _draw_area.spl_h != 1)
+			Next_source = false;
+		if(Next_source)
+			_next_source = true;
+		if (_next_source)
+		{
+			_next_source = false;
+			Next_source = false;
+			break;
+		}
+	}
+	//	BusyAI = false;
+	return _capture_success;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+//カメラのオープン
+int CameraOpenCycle(
+	int _DrawCycleMode,
 	HWND hWnd,		//Windowハンドル
-	void* __pt_yod,	//yolov5処理クラスのインスタンスへのポインタ nullだと無視
-	std::vector<std::vector<std::string>> urls,
-	int draw_area,
-	std::ofstream* pAICSV
+	//int _draw_area,
+	//bool _keep_aspect,
+	//cv::VideoCapture& _capture,
+	cv::VideoCapture* _pt_capture,
+	YoloObjectDetection* _pt_YoloObjectDetection,
+	PoseNet* _pt_pose,
+	std::vector<std::vector<std::string>> _urls,
+	int _current_url_index,
+	bool& _usbcam
+//	std::ofstream* _pAICSV
 )
 {
 	bool _cam_on = false;
-	cvw_stop = 0;
-	cv::VideoCapture capture;
-	cv::Mat image0;
-
+	//int _current_url_index = 0;
 	std::string _ai_out_put_string;
-	cv::Mat resized_image;
-	cv::Mat post_proccesed_image;
+	std::string _ai_file_name = "";
+
+	//HDC hDC = ::GetDC(hWnd);
 
 	//明示的にキャスト 
-	YoloObjectDetection* _pt_yod = (YoloObjectDetection*)__pt_yod;
+	if (_DrawCycleMode == DRAWCYCLE_YOLO5 && _pt_YoloObjectDetection != nullptr)
+		_ai_file_name = _pt_YoloObjectDetection->YP.onnx_file_name;
+	else if (_DrawCycleMode == DRAWCYCLE_YOLO8 && _pt_YoloObjectDetection != nullptr)
+		_ai_file_name = _pt_YoloObjectDetection->YP.onnx_file_name;
+	else if (_DrawCycleMode == DRAWCYCLE_POSENET && _pt_pose != nullptr)
+		_ai_file_name = _pt_pose->get_weightsFile();
+//	else
+//		LOGMSGX("Unmatch AI model and names file");
 
-	int current_url_index = 0;
-	//int display_time_seconds = 3; // Change display time in seconds
-	HDC hDC = ::GetDC(hWnd);
-
-	//_mvw_org.open("video_org.mp4");
-	//_mvw_ai.open("video_ai.mp4");
-
-	while (true)
+	//while文
+	while (_cam_on == false)
 	{
-		auto start = std::chrono::steady_clock::now();
-		while (_cam_on == false)
+		//ストップ指示があったら、カメラ切り替えループを出る
+		if (cvw_set_stop == true)
 		{
-			//ウィンドウキャプションの文字列
-			std::string _ipurl = urls[current_url_index][1];
-			//std::string _title = urls[current_url_index][0];
-			std::ostringstream window_caption;
-			window_caption << urls[current_url_index][0] << " " << ((YoloObjectDetection*)__pt_yod)->_YP._onnx_file_name;
-			//std::wstring newTitleW = stringToWstring(urls[current_url_index][0]);
-			std::wstring newTitleW = stringToWstring(window_caption.str().c_str());
-			SetWindowTextW(hWnd, newTitleW.c_str());
-
-			int num_usb;
-			std::istringstream iss(_ipurl);
-			if (iss >> num_usb)
-			{
-				capture.open(num_usb);
-			}
-			else
-			{
-				capture.open(_ipurl);
-			}
-
-			//画面を黒く塗りつぶす
-			AllPaintBlack(hWnd, hDC);
-			//テキストをクリア
-			_ai_out_put_string = "";
-			DoEvents();
-			if (capture.isOpened())
-			{
-				_cam_on = true;
-			}
-			else
-			{
-				std::cerr << "Failed to open the stream: " << _ipurl << std::endl;
-				_cam_on = false;
-			}
+			_cam_on = false; //念のため
+			break;
 		}
+		//ウィンドウキャプションの文字列
+		std::string _ipurl = _urls[_current_url_index][1];
+		std::ostringstream _window_caption;
+		_window_caption << _urls[_current_url_index][0] << " " << _ai_file_name;
 
-		while (true)
+		std::wstring newTitleW = stringToWstring(_window_caption.str().c_str());
+		SetWindowTextW(hWnd, newTitleW.c_str());
+
+		//bool return_cap;
+		int _num_usb;
+		std::istringstream _iss(_ipurl);
+		///////////////////////////////////////////////////////////////////////////////////////////////////////
+		//カメラオープンブロック
 		{
-			std::string _ost;
-			//std::string _dummy("test ");
-			capture >> image0;
-
-			//AI処理
-			float NMS_INIT = _pt_yod->_YP._nms_threshold;
-			float CNF_INIT = _pt_yod->_YP._confidence_thresgold;
-			float SCR_INIT = _pt_yod->_YP._score_threshold;
-
-			//CSV出力の生成
-			std::ostringstream _header;
-
-			//cv::Mat resized_image;
-			if (image0.empty() || image0.rows == 0 || image0.cols == 0)
+			std::atomic<bool> _connected;
+			//数値変換出来たらUSBカメラ
+			if (_iss >> _num_usb)
 			{
-				cvw_set_stop = true;
-				goto GOTO_LOOPEND;
-			}
-			//ここでリサイズ
-			cv::resize(
-				image0,
-				resized_image,
-				cv::Size(),
-				(double)_pt_yod->_YP._input_width / image0.cols,
-				(double)_pt_yod->_YP._input_height / image0.rows);
-
-			wait_drawing();
-			_drawing_flag = true;
-
-			//AIの処理
-			_pt_yod->_pre_process(resized_image);
-
-			//AIの後処理
-			_header <<"AI,\""<< urls[current_url_index][0] <<"\","<< urls[current_url_index][1]<<"," << _TimeStumpStr();
-			post_proccesed_image = _pt_yod->_post_process(true, image0.clone(), _header.str().c_str(), _ost);
-			_drawing_flag = false;
-
-			_mvw_org.write(image0);
-			_mvw_ai.write(post_proccesed_image);
-
-
-			//AllPaintBlack(hWnd, hDC); //ちらつく
-			//描画
-			_rec_stump(post_proccesed_image, _mvw_ai._VIDEO_REC);
-			DrawPicToHDC(post_proccesed_image, hWnd, hDC, true, draw_area);//アスペクト比を維持する。
-
-			_ai_out_put_string = _ai_out_put_string + "\n" + _ost;
-			if (_ai_text_output)
-			{
-				//aiの出力をテキストで画面にバーっと出す。ターミネーター、のようにはならなかった。
-				MyDrawText(hWnd, hDC, _ai_out_put_string, 5, 50);
-			}
-
-			//AIの出力をテキストファイルに保存
-			if (pAICSV != nullptr)
-			{
-				*pAICSV << _ost;
-				pAICSV->flush();
-			}
-
-			if (0) //ループ内でWindowsに制御を渡す処理だが特に要らないようだ
-			{
-				MSG msg;
-				if (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-				{
-					::TranslateMessage(&msg);
-					::DispatchMessage(&msg);
+				//TRYCAT(_pt_capture->open(_num_usb));
+				//std::thread tryConnect(_num_usb, _pt_capture, _connected);
+				std::thread connectionThread(tryConnect_usb, _num_usb, _pt_capture, std::ref(_connected));
+				_usbcam = true;
+				catchConnect(_pt_capture, _connected, connectionThread);
+				if (!_connected) {
+					LOGMSG2X("接続タイムアウト", _num_usb);
+					break;
 				}
-				DoEvents();
-				Sleep(sleep);
-			}
-
-			GOTO_LOOPEND:
-			auto now = std::chrono::steady_clock::now();
-			//タイマー
-			if (std::chrono::duration_cast<std::chrono::seconds>(now - start).count() >= display_time_seconds)
-				break;
-			//次の画面 フラグをリセットしループから出る
-			if (_next_source)
+			}//それ以外なら
+			else
 			{
-				_next_source = false;
-				break;
+				//TRYCAT(_capture.open(_ipurl));
+				//TRYCAT(_pt_capture->open(_ipurl));
+				std::thread connectionThread(tryConnect_url, _ipurl, _pt_capture, std::ref(_connected));
+				_usbcam = false;
+				catchConnect(_pt_capture, _connected, connectionThread);
+				if (!_connected) {
+					LOGMSG2X("接続タイムアウト",_ipurl);
+					break;
+				}
 			}
-			//描画ループを出る
-			if (cvw_set_stop == true)
-				break;
+			
 		}
-		capture.release();
+		//テキストをクリア
+		_ai_out_put_string = "";
+		DoEvents();
+		//if (_capture.isOpened())
+		if (_pt_capture->isOpened())
+		{
+			_cam_on = true;
+
+			//bool _FPSSET = _capture.set(cv::CAP_PROP_FPS, 1000 / fram_interval_ms);
+			//double _FPS = _capture.get(cv::CAP_PROP_FPS);
+			bool _FPSSET = _pt_capture->set(cv::CAP_PROP_FPS, 1000 / fram_interval_ms);
+			double _FPS = _pt_capture->get(cv::CAP_PROP_FPS);
+			LOGMSG2("Camera set FPS ", _FPSSET);
+			LOGMSG2("Camera FPS ", _FPS);
+		}
+		else
+		{
+			LOGMSG2("Failed to open the stream ", _ipurl);
+			LOGMSG2("_urls[_current_url_index][0] = ", _urls[_current_url_index][0]);
+			LOGMSG2("_urls[_current_url_index][1] = ", _urls[_current_url_index][1]);
+			//std::cerr << "Failed to open the stream: " << _ipurl << std::endl;
+			_cam_on = false;
+			capture_error_count++;
+			if (capture_error_count > CAPTURE_ERRROR_COUNT_MAX)
+			{
+				LOGMSG2X("Over max count of capture error, go to next camera", _ipurl);
+				std::ostringstream _msg_str;
+				if (0)
+				{
+					_msg_str << "指定先のカメラと接続できませんでした。" << std::endl
+						<< "カメラリストファイルを見直してください。" << std::endl
+						//<< url_file << std::endl
+						//<< "カメラ情報" << std::endl これ入れるとバグる　なぜ?
+						<< _urls[_current_url_index][0] << std::endl
+						<< _urls[_current_url_index][1] << std::endl;
+
+					std::wstring _lpcstr_tmp =  _A2CW(_msg_str.str().c_str());
+ 					//LPCWSTR _lpcstr_tmp = _A2CW(_msg_str.str().c_str());
+					int msgboxID = MessageBoxW(hWnd, _lpcstr_tmp.c_str(), L"StreamViewerAI2.exe", MB_ICONWARNING | MB_OK);
+				}
+				//cvw_set_stop = true; //ストップはしない
+				_cam_on = false;
+				break;//次のカメラへ
+			}
+		}
+	}
+	return 0;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+//カメラのオープンする
+//カメラがオープンしたら、DrawCycleを処理し描画サイクルを処理させる。
+//DrawCycleから戻ってきたら次のカメラをオープンする。
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+int Count_VideoCapture=0;
+int DrawCV2Window(
+	int _DrawCycleMode,
+	HWND hWnd,		//Windowハンドル
+	HDC hDC,
+	DrawArea _draw_area,
+	bool _keep_aspect,
+	YoloObjectDetection* _pt_YoloObjectDetection,
+	PoseNet* _pt_pose,
+	std::vector<std::vector<std::string>> _urls,
+	std::ofstream* _pAICSV
+)
+{
+	bool _cam_on = false;
+	//bool _cycle = true;
+	bool _cycle = true;
+	bool _usbcam = false;
+	cvw_stop = 0;
+
+	std::string _ai_out_put_string;
+	std::string _ai_file_name = "";
+	int _current_url_index = 0;
+	//int Current_url_index = 0;
+
+	//cv::VideoCapture _capture;
+	//cv::VideoCapture* _pt_capture;
+
+	//HDC hDC = ::GetDC(hWnd);
+	//	ここからカメラ切り替えサイクル
+	while (_cycle) //
+	{
+		//HDC hDC = ::GetDC(hWnd);
+		{
+			cv::VideoCapture* _pt_capture;
+			_pt_capture = new cv::VideoCapture;
+			//LOGMSG2("Current_url_index", Current_url_index);
+			if (fix_cam_number != -1)
+			{
+				//カメラ番号の指定があればそれを指定する。スパゲッティだなあ。
+				_current_url_index = fix_cam_number;
+			}
+			int _ret = CameraOpenCycle(
+				_DrawCycleMode,
+				hWnd,		//Windowハンドル
+				//int _draw_area,
+				//bool _keep_aspect,
+				//_capture,
+				_pt_capture,
+				_pt_YoloObjectDetection,
+				_pt_pose,
+				_urls,
+				_current_url_index,
+				_usbcam
+				//	std::ofstream* _pAICSV
+			);
+			if (_ret)
+				Count_VideoCapture++;
+			//画面を黒く塗りつぶす
+			if (_keep_aspect && fix_cam_number == -1)
+			{
+				HDC _hDC = GetDC(hWnd);
+				AllPaintBlack(hWnd, _hDC, _draw_area);
+				ReleaseDC(hWnd, _hDC);
+			}
+			////////////////////////////////////////////////////////////////
+			//描画サイクル
+			DrawCycle(
+				_DrawCycleMode,
+				hWnd,
+				hDC,
+				_draw_area,
+				_keep_aspect,
+				//_capture,
+				_pt_capture,
+				_pt_YoloObjectDetection,
+				_pt_pose,
+				_urls[_current_url_index][0],
+				_urls[_current_url_index][1],
+				_ai_out_put_string,
+				_pAICSV,
+				display_time_seconds,
+				FLAG_TIMESTUMP
+			);
+
+			//_capture.release();
+			_pt_capture->release();
+
+			delete _pt_capture;
+			_pt_capture = nullptr;
+			if (_ret)
+				Count_VideoCapture--;
+			LOGMSG2("Count_VideoCapture", Count_VideoCapture);
+		}
 		_cam_on = false;
 
 		//カメラ切り替えループを出る
 		if (cvw_set_stop == true)
 			break;
 
-		current_url_index = (current_url_index + 1) % (int)urls.size();
+		_current_url_index = (_current_url_index + 1) % (int)_urls.size();
 	}
+	//処理がストップしたことをメインに伝える
 	cvw_stop = true;
 
-	ReleaseDC(hWnd, hDC);
-	_mvw_org.release();
-	_mvw_ai.release();
+	//ReleaseDC(hWnd, hDC);
+
+	mvw_org.release();
+	mvw_ai.release();
+
+	//マルチスレッドなので戻り値は無視される
 	return 0;
 }
 
-
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
 int DrawCV2Windowf(
+	int _DrawCycleMode,
 	HWND hWnd,		//Windowハンドル
-	void* __pt_yod,	//yolov5処理クラスのインスタンスへのポインタ nullだと無視
+	HDC hDC,
+	DrawArea _draw_area,
+	bool _keep_aspect,
+	//	void* _pt_ai,	//yolov5処理クラスのインスタンスへのポインタ nullだと無視
+	YoloObjectDetection* _pt_YoloObjectDetection,
+	PoseNet* _pt_pose,
 	std::string _file_name,
-	int draw_area,
-	std::ofstream* pAICSV
+	std::ofstream* _pAICSV
 )
 {
 	bool _cam_on = false;
 	cvw_stop = 0;
-	cv::VideoCapture capture;
-	cv::Mat image0;
+	cv::VideoCapture _capture;
 
 	std::string _ai_out_put_string;
-	cv::Mat resized_image;
-	cv::Mat post_proccesed_image;
 
-	//明示的にキャスト 
-	YoloObjectDetection* _pt_yod = (YoloObjectDetection*)__pt_yod;
+	//Windowバーにファイル名を表示
+	std::string ai_file_name = "";
+	if (_DrawCycleMode == DRAWCYCLE_YOLO5 && _pt_YoloObjectDetection!=nullptr)
+		ai_file_name = _pt_YoloObjectDetection->YP.onnx_file_name;
+	if (_DrawCycleMode == DRAWCYCLE_YOLO8 && _pt_YoloObjectDetection != nullptr)
+		ai_file_name = _pt_YoloObjectDetection->YP.onnx_file_name;
+	else if(_DrawCycleMode == DRAWCYCLE_POSENET && _pt_pose!=nullptr)
+		ai_file_name = _pt_pose->get_weightsFile();
 
 	int current_url_index = 0;
-	//int display_time_seconds = 3; // Change display time in seconds
-	HDC hDC = ::GetDC(hWnd);
 
-	auto start = std::chrono::steady_clock::now();
 	//ウィンドウキャプションの文字列
-	//std::string _ipurl = urls[current_url_index][1];
 	std::ostringstream window_caption;
-	window_caption << _file_name << " " << ((YoloObjectDetection*)__pt_yod)->_YP._onnx_file_name;
+	window_caption << _file_name << " " << ai_file_name;
+
 	std::wstring newTitleW = stringToWstring(window_caption.str().c_str());
 	SetWindowTextW(hWnd, newTitleW.c_str());
 
-	//数字だったらUSBカメラ
-	//この処理要らんかも
-	int num_usb;
-	std::istringstream iss(_file_name);
-	if (iss >> num_usb)
-	{
-		capture.open(num_usb);
-	}
-	else
-	{
-		capture.open(_file_name);
-	}
+	_capture.open(_file_name);
 
 	//画面を黒く塗りつぶす
-	AllPaintBlack(hWnd, hDC);
+	AllPaintBlack(hWnd, hDC, _draw_area);
 	//テキストをクリア
 	_ai_out_put_string = "";
 	DoEvents();
-	if (capture.isOpened())
+	if (_capture.isOpened())
 	{
 		_cam_on = true;
 	}
@@ -540,95 +722,26 @@ int DrawCV2Windowf(
 		_cam_on = false;
 	}
 
-	//while (true)
-	while (capture.read(image0))
-	{
-		//cvw_file_processing = true;
-		cvw_file_end = false;
+	cvw_file_end = false;
 
-		std::string _ost;
-		//capture >> image0;
+	DrawCycle(
+		_DrawCycleMode,
+		hWnd,
+		hDC,
+		_draw_area,
+		_keep_aspect,
+		&_capture,
+		_pt_YoloObjectDetection,
+		_pt_pose,
+		_file_name,
+		"",
+		_ai_out_put_string,
+		_pAICSV,
+		0,
+		0 //TIMESTUMPなし
+	);
 
-		//AI処理
-		float NMS_INIT = _pt_yod->_YP._nms_threshold;
-		float CNF_INIT = _pt_yod->_YP._confidence_thresgold;
-		float SCR_INIT = _pt_yod->_YP._score_threshold;
-
-		//CSV出力の生成
-		std::ostringstream _header;
-
-		//cv::Mat resized_image;
-		cvw_set_stop = false;
-		if (image0.empty() || image0.rows == 0 || image0.cols == 0)
-		{
-			cvw_set_stop = true;
-			goto GOTO_LOOPEND;
-		}
-			//ここでリサイズ
-		cv::resize(
-			image0,
-			resized_image,
-			cv::Size(),
-			(double)_pt_yod->_YP._input_width / image0.cols,
-			(double)_pt_yod->_YP._input_height / image0.rows);
-
-		wait_drawing();
-		_drawing_flag = true;
-
-		//AIの処理
-		_pt_yod->_pre_process(resized_image);
-
-		//AIの後処理
-		_header << "AI,\"" << _file_name << "\"," << _file_name << "," << _TimeStumpStr();
-		post_proccesed_image = _pt_yod->_post_process(true, image0.clone(), _header.str().c_str(), _ost);
-		_drawing_flag = false;
-
-		_mvw_org.write(image0);
-		_mvw_ai.write(post_proccesed_image);
-
-
-		//AllPaintBlack(hWnd, hDC); //ちらつく
-		//描画
-		_rec_stump(post_proccesed_image, _mvw_ai._VIDEO_REC);
-		DrawPicToHDC(post_proccesed_image, hWnd, hDC, true, draw_area);//アスペクト比を維持する。
-
-		_ai_out_put_string = _ai_out_put_string + "\n" + _ost;
-		if (_ai_text_output)
-		{
-			//aiの出力をテキストで画面にバーっと出す。ターミネーター、のようにはならなかった。
-			MyDrawText(hWnd, hDC, _ai_out_put_string, 5, 50);
-		}
-
-		//AIの出力をテキストファイルに保存
-		if (pAICSV != nullptr)
-		{
-			*pAICSV << _ost;
-			pAICSV->flush();
-		}
-
-		if(0) //ループ内でWindowsにリソースを渡す処理だが特に要らないようだ
-		{
-			MSG msg;
-			if (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-			{
-				::TranslateMessage(&msg);
-				::DispatchMessage(&msg);
-			}
-
-			DoEvents();
-			Sleep(10);
-		}
-	GOTO_LOOPEND:
-		//フラグをリセットしループから出る　_next_sourceは特定のキーが押されたときWinProcで値が入る
-		if (_next_source)
-		{
-			_next_source = false;
-			break;
-		}
-		if (cvw_set_stop == true)
-			break;
-	}
-	capture.release();
+	_capture.release();
 
 	//処理が終わったことをwinprocに伝えるためのフラグ
 	cvw_file_processing = false;
@@ -637,184 +750,9 @@ int DrawCV2Windowf(
 	//↓これ要るか?
 	cvw_stop = true;
 
-	ReleaseDC(hWnd, hDC);
-	_mvw_org.release();
-	_mvw_ai.release();
-	return 0;
-}
-
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-void AdjustAspectImageSize(const cv::Size& imageSize, const cv::Size& destSize, cv::Size& newSize)
-{
-	double destAspectRatio = float(destSize.width) / float(destSize.height);
-	double imageAspectRatio = float(imageSize.width) / float(imageSize.height);
-
-	if (imageAspectRatio > destAspectRatio)
-	{
-		// Margins on top/bottom
-		newSize.width = destSize.width;
-		newSize.height = int(imageSize.height *
-			(double(destSize.width) / double(imageSize.width)));
-	}
-	else
-	{
-		// Margins on left/right
-		newSize.height = destSize.height;
-		newSize.width = int(imageSize.width *
-			(double(destSize.height) / double(imageSize.height)));
-	}
-}
-
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-//Windowsのコントロールに書き込む関数
-//int DrawPicToHDC(cv::Mat cvImg, HWND nDlgID, int nIDDlgItem, bool bMaintainAspectRatio) //bMaintainAspectRatio=true
-int DrawPicToHDC(cv::Mat cvImg, HWND hWnd, HDC hDC, bool bMaintainAspectRatio, int drawing_position) //bMaintainAspectRatio=true
-{
-	//無限ループになることがあるので、システムに処理を渡す。
-	//DoEvents();
-	if (cvImg.rows == 0 || cvImg.cols == 0) //画像の大きさが0だったら何もしない
-	{
-		return 0;
-	}
-	//オリジナルではHDCを生成していたが外した
-	//HDC hDC = ::GetDC(hWnd);
-
-	CRect rect;
-
-	//Windowのサイズ
-	GetClientRect(hWnd, rect);
-	cv::Size winSize(rect.right, rect.bottom);
-
-	//表示する画像のサイズ
-	cv::Size origImageSize(cvImg.cols, cvImg.rows);
-	cv::Size imageSize;
-	int  offsetX;
-	int  offsetY;
-
-	if (!bMaintainAspectRatio)//アスペクト比を無視
-	{
-		// Image should be the same size as the control's rectangle
-		imageSize = winSize;
-	}
-	else //アスペクト比を維持
-	{
-		cv::Size newSize;
-		AdjustAspectImageSize(origImageSize, winSize, imageSize);
-	}
-	if (drawing_position == DRAW_ALL)
-	{
-		offsetX = (winSize.width - imageSize.width) / 2;
-		offsetY = (winSize.height - imageSize.height) / 2;
-	}
-	//4分割
-	else if (drawing_position == DRAW_UPLEFT)
-	{
-		//描画の原点
-		offsetX = (winSize.width - imageSize.width) / 2;
-		offsetY = 0;
-
-		imageSize = imageSize / 2;
-	}
-	else if (drawing_position == DRAW_UPRIGHT)
-	{
-		//描画の原点
-		offsetX = winSize.width / 2;
-		offsetY = 0;
-
-		imageSize = imageSize / 2;
-	}
-	else if (drawing_position == 3)
-	{
-		//描画の原点
-		offsetX = (winSize.width - imageSize.width) / 2;
-		offsetY = winSize.height / 2;
-
-		imageSize = imageSize / 2;
-	}
-	else if (drawing_position == 4)
-	{
-		//描画の原点
-		offsetX = winSize.width / 2;
-		offsetY = winSize.height / 2;
-
-		imageSize = imageSize / 2;
-	}
-
-
-	// Resize the source to the size of the destination image if necessary
-
-	cv::Mat cvImgTmp;
-	cv::resize(cvImg, cvImgTmp, imageSize, 0, 0, cv::INTER_AREA);
-	//cv::Mat* pt_cvImgTmp;
-	//pt_cvImgTmp = new cv::Mat();
-	//cv::resize(cvImg, *pt_cvImgTmp, imageSize, 0, 0, cv::INTER_AREA);
-
-
-	// To handle our Mat object of this width, the source rows must
-	// be even multiples of a DWORD in length to be compatible with 
-	// SetDIBits().  Calculate what the correct byte width of the 
-	// row should be to be compatible with SetDIBits() below.
-	int stride = ((((imageSize.width * 24) + 31) & ~31) >> 3);
-
-	// Allocate a buffer for our DIB bits
-	uchar* pcDibBits = (uchar*)malloc(imageSize.height * stride);
-
-	if (pcDibBits != NULL)
-	{
-		// Copy the raw pixel data over to our dibBits buffer.
-		// NOTE: Can setup cvImgTmp to add the padding to skip this.
-		for (int row = 0; row < cvImgTmp.rows; ++row)
-			//for (int row = 0; row < pt_cvImgTmp->rows; ++row)
-		{
-			// Get pointers to the beginning of the row on both buffers
-			uchar* pcSrcPixel = cvImgTmp.ptr<uchar>(row);
-			//uchar* pcSrcPixel = pt_cvImgTmp->ptr<uchar>(row);
-			uchar* pcDstPixel = pcDibBits + (row * stride);
-
-			// We can just use memcpy
-			memcpy(pcDstPixel,
-				pcSrcPixel,
-				stride);
-		}
-		// Initialize the BITMAPINFO structure
-		BITMAPINFO bitInfo;
-		bitInfo.bmiHeader.biBitCount = 24;
-		bitInfo.bmiHeader.biWidth = cvImgTmp.cols;
-		bitInfo.bmiHeader.biHeight = -cvImgTmp.rows;
-		//bitInfo.bmiHeader.biWidth = pt_cvImgTmp->cols;
-		//bitInfo.bmiHeader.biHeight = -pt_cvImgTmp->rows;
-		bitInfo.bmiHeader.biPlanes = 1;
-		bitInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-		bitInfo.bmiHeader.biCompression = BI_RGB;
-		bitInfo.bmiHeader.biClrImportant = 0;
-		bitInfo.bmiHeader.biClrUsed = 0;
-		bitInfo.bmiHeader.biSizeImage = 0;      //winSize.height * winSize.width * * 3;
-		bitInfo.bmiHeader.biXPelsPerMeter = 0;
-		bitInfo.bmiHeader.biYPelsPerMeter = 0;
-
-		// Add header and OPENCV image's data to the HDC
-		StretchDIBits(hDC,
-			offsetX,
-			offsetY,
-			cvImgTmp.cols,
-			cvImgTmp.rows,
-			//pt_cvImgTmp->cols,
-			//pt_cvImgTmp->rows,
-			0,
-			0,
-			cvImgTmp.cols,
-			cvImgTmp.rows,
-			//pt_cvImgTmp->cols,
-			//pt_cvImgTmp->rows,
-			pcDibBits,
-			&bitInfo,
-			DIB_RGB_COLORS,
-			SRCCOPY);
-
-		free(pcDibBits);
-	}
 	//ReleaseDC(hWnd, hDC);
-	//delete pt_cvImgTmp;
+	mvw_org.release();
+	mvw_ai.release();
 	return 0;
 }
 

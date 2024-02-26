@@ -8,42 +8,42 @@
 
 //std::ofstream _logf;
 
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+////////////////////////////////////////////////////////////////////////////////////
 //ログ関係
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+////////////////////////////////////////////////////////////////////////////////////
 //実体
-_LogFile _LGF;
+LogFile LGF;
 
-_LogFile::_LogFile(const char* fpath)
+LogFile::LogFile(const char* fpath)
 {
 	open(fpath);
 }
 
-int _LogFile::open(const char* fpath)
+int LogFile::open(const char* fpath)
 {
 	_fpath = std::string(fpath);
 	//_TimeStump();
 	//_LF << "APPLICATION START" << std::endl;
 	_LF = std::ofstream(fpath, std::ios_base::out);
 	//_LF = std::ofstream(_fpath.c_str(), std::ios_base::out);
-	//_LF << "START" << _get_YYYYMMDD() << " "<< _get_hhmmss() <<std::endl;
+	_LF << "START " << get_YYYYMMDD() << " "<< get_hhmmss() <<std::endl;
 
 	return 0;
 }
 
-_LogFile::~_LogFile()
+LogFile::~LogFile()
 {
 	_LF.close();
 }
 
-void _LogFile::flush()
+void LogFile::flush()
 {
 	//↓これが有効だとデバックモードでバグる 落ちないけど無反応。ファイルハンドルが足りなくなる?
 	//_LF.close();
 	//_LF = std::ofstream(_fpath, std::ios_base::app);
 }
 
-std::string _TimeStumpStr()
+std::string TimeStumpStr()
 {
 	std::time_t rawtime;
 	std::tm timeinfo;
@@ -60,7 +60,7 @@ std::string _TimeStumpStr()
 	return _ost.str();
 }
 
-std::string _str_YYMMDD()
+std::string str_YYMMDD()
 {
 	std::time_t rawtime;
 	std::tm timeinfo;
@@ -76,14 +76,14 @@ std::string _str_YYMMDD()
 
 
 /*
-std::string _STR_TimeStumpStr()
+std::string _STRTimeStumpStr()
 {
 	USES_CONVERSION;
-	return A2OLE(_TimeStumpStr());
+	return A2OLE(TimeStumpStr());
 }
 */
 
-int _LogFile::_TimeStump()
+int LogFile::TimeStump()
 {
 	//std::time_t rawtime;
 	//std::tm timeinfo;
@@ -93,14 +93,14 @@ int _LogFile::_TimeStump()
 	//long tmpHHMMSS = timeinfo.tm_hour * 10000 + timeinfo.tm_min * 100 + timeinfo.tm_sec;
 
 	//_LF << (1900 + timeinfo.tm_year) << "/" << (timeinfo.tm_mon + 1) << "/" << timeinfo.tm_mday << " " << timeinfo.tm_hour << ":" << timeinfo.tm_min << ":" << timeinfo.tm_sec<<std::endl;
-	_LF << _TimeStumpStr() << std::endl;
+	_LF << TimeStumpStr() << std::endl;
 	return 0;
 }
 
 
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+////////////////////////////////////////////////////////////////////////////////////
 //システム関係
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+////////////////////////////////////////////////////////////////////////////////////
 /*MFC依存
 void DoEvents(int n)
 {
@@ -116,10 +116,10 @@ void DoEvents(int n)
 }
 */
 
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+////////////////////////////////////////////////////////////////////////////////////
 //時間関係
-//■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-long _get_hhmmss()
+////////////////////////////////////////////////////////////////////////////////////
+long get_hhmmss()
 {
 	std::time_t rawtime;
 	std::tm timeinfo;
@@ -129,7 +129,7 @@ long _get_hhmmss()
 
 	return tmpHHMMSS;
 }
-long _get_YYYYMMDD()
+long get_YYYYMMDD()
 {
 	std::time_t rawtime;
 	std::tm timeinfo;

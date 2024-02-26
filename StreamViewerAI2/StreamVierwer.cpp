@@ -2,32 +2,40 @@
 //
 #include "stdafx.h"
 #include "framework.h"
-#include "StreamVierwer.h"
+#include "mylib.h"
 #include "yolov5_engine.h"
+#include "pose.h"
+#include "StreamVierwer.h"
 
 #include <atlbase.h>
 #include <atlconv.h>
-
 
 #define MAX_LOADSTRING 100
 
 #define _AI_NAMES "default.names"
 #define _AI_ONNX "default.onnx"
 #define _AI_CAMS "default.txt"
-#define _SCORE_THRESHOLD 0.15
-#define _NMS_THRESHOLD 0.45
-#define _CONFIDENCE_THRESHOLD 0.15
+#define _AI_NAMES8 "coco.names"
+#define _AI_ONNX8 "yolov8m.onnx"
+//#define _SCORE_THRESHOLD 0.10
+//#define _NMS_THRESHOLD 0.40
+//#define _CONFIDENCE_THRESHOLD 0.10
 #define _AI_WIDTH 0 //自動
 #define _AI_HEIGHT 0 //自動
 
-static std::string url_file; // ストリームURLのリストが記載されたファイル名
-static std::string onnx_file; // ストリームURLのリストが記載されたファイル名
-static std::string names_file; // ストリームURLのリストが記載されたファイル名
+static std::string url_file(""); // ストリームURLのリストが記載されたファイル名
+static std::string onnx_file(""); // ストリームURLのリストが記載されたファイル名
+static std::string names_file(""); // ストリームURLのリストが記載されたファイル名
+static std::string onnx_file8(""); // ストリームURLのリストが記載されたファイル名
+static std::string names_file8(""); // ストリームURLのリストが記載されたファイル名
+static std::string video_file_path = "";
+
+std::string poseweight;
+std::string poseproto;
 
 //static LPWSTR url_file; // ストリームURLのリストが記載されたファイル名
 //static LPWSTR onnx_file; // ストリームURLのリストが記載されたファイル名
 //static LPWSTR names_file; // ストリームURLのリストが記載されたファイル名
-
 
 // グローバル変数:
 HINSTANCE hInst;                    // 現在のインターフェイス
@@ -36,28 +44,219 @@ WCHAR szWindowClass[MAX_LOADSTRING];// メイン ウィンドウ クラス名
 HWND hText;                         //テキストボックス
 HINSTANCE hInstance;                //テキストボックスのインスタンス
 
+//グローバル変数
+//extern std::vector<std::string> urls;
+#define VIEWMAX 64 
+std::thread* main_th[VIEWMAX] = { 
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,
+    nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr
+};
+//volatile bool wm_paint_now = false;
+std::atomic<bool> wm_paint_now = false;
+
+std::vector<std::vector<std::string>> cam_urls; //[0]にはタイトル、[1]にはurlが入っている
+
 //AI
-YoloObjectDetection* _pt_yod = nullptr;		//サムネイル表示の時のAIクラス 複数のカメラでAIを共有、管理クラスからポインタをコピー
+YoloObjectDetection* pt_YoloObjectDetection = nullptr;		//サムネイル表示の時のAIクラス 複数のカメラでAIを共有、管理クラスからポインタをコピー
 int _ai_running = 0;
 #define CSVFILE "ai_proccessed.csv"
 std::ofstream* pAICSV = nullptr;
-volatile bool bSuppressPaint = FALSE;
+//volatile bool bSuppressPaint = FALSE;
+std::atomic<bool> bSuppressPaint = FALSE;
+int _pose_running = 0;
 
-#define MP4VHA "video_org.mp4"
-#define MP4VHAAI "video_ai.mp4"
-#define MP4HD "video_hd_org.mp4"
-#define MP4HDAI "video_hd_ai.mp4"
+HWND hEdit;
+HBRUSH hbrBlackBrush;
+PoseNet* _ptg_posenet;
 
-volatile int appmode = 0;
+//HOMEDRIVE = C:
+//HOMEPATH = \Users\km47381
+std::string MP4VHA   = "video_org";     //録画する時使用するファイル名
+std::string MP4VHAAI = "video_ai";      //録画する時使用するファイル名
+std::string MP4HD    = "video_hd_org";  //録画する時使用するファイル名
+std::string MP4HDAI  = "video_hd_ai";   //録画する時使用するファイル名
+std::string MP4PATH  = "%HOMEDRIVE%%HOMEPATH%\\";     //録画する時使用するファイル名
+std::string MP4EXT   = ".mp4";                      //録画する時使用するファイル名
+
+#define INIFILE "default.ini"
 #define APPMODE_NETCAM 0
 #define APPMODE_USBCAM 1
 #define APPMODE_MOVFILE 2
+
+//volatile int appmode = APPMODE_NETCAM;
+std::atomic<int> appmode = APPMODE_NETCAM;
+int DrawCycleMode = DRAWCYCLE_YOLO5;
+
+#define RWFILE_WRITE 1
+#define RWFILE_READ 0
+int read_write_file(std::string _inifile_path, int rw);
 
 // このコード モジュールに含まれる関数の宣言を転送します:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+
+//bool Mode4View = false;
+int ViewMode = IDM_VIEW_1;
+
+int WINDOW_MAX = 1;
+
+int read_write_file(std::string _inifile_path, int rw)
+{
+    if (rw == RWFILE_WRITE)
+    {
+        std::ofstream inifile;
+        inifile.open(INIFILE, std::ios::out);
+        if (DrawCycleMode == DRAWCYCLE_POSENET)
+            inifile << "AI_MODE =              " << "POSE_NET" << std::endl;
+        else if(DrawCycleMode==DRAWCYCLE_YOLO5)
+            inifile << "AI_MODE =              " << "OBJECT_DETECTION" << std::endl;
+        else if (DrawCycleMode == DRAWCYCLE_YOLO8)
+            inifile << "AI_MODE =              " << "OBJECT_DETECTION_YOLOV8" << std::endl;
+        else
+            inifile << "AI_MODE =              " << "STREAM" << std::endl;
+
+        if (ViewMode == IDM_VIEW_4)
+            inifile << "VIEW_MODE =           " << "4" << std::endl;
+        else if (ViewMode == IDM_VIEW_6)
+            inifile << "VIEW_MODE =           " << "6" << std::endl;
+        else if (ViewMode == IDM_VIEW_9)
+            inifile << "VIEW_MODE =           " << "9" << std::endl;
+        else if (ViewMode == IDM_VIEW_12)
+            inifile << "VIEW_MODE =           " << "12" << std::endl;
+        else if (ViewMode == IDM_VIEW_16)
+            inifile << "VIEW_MODE =           " << "16" << std::endl;
+        else if (ViewMode == IDM_VIEW_36)
+            inifile << "VIEW_MODE =           " << "36" << std::endl;
+        else if (ViewMode == IDM_VIEW_64)
+            inifile << "VIEW_MODE =           " << "64" << std::endl;
+        else
+            inifile << "VIEW_MODE =           " << "1" << std::endl;
+
+        inifile << "STREAM_LIST_FILE =     " << url_file << std::endl;
+        inifile << "ONNX_FILE =            " << onnx_file << std::endl;
+        inifile << "NAMES_FILE =           " << names_file << std::endl;
+        inifile << "ONNX_FILE_YOLOV8 =     " << onnx_file8 << std::endl;
+        inifile << "NAMES_FILE_YOLOV8 =    " << names_file8 << std::endl;
+        inifile << "DISPLAY_TIME[SECOND] = " << display_time_seconds << std::endl;
+        //inifile << "POSE_WEIGHT_FILE =     \"" << poseweight << "\"" << std::endl;
+        //inifile << "POSE_PROTO_FILE =      \"" << poseproto << "\"" << std::endl;
+        inifile << "POSE_WEIGHT_FILE =     " << poseweight << std::endl;
+        inifile << "POSE_PROTO_FILE =      " << poseproto << std::endl;
+        inifile << "SLEEP_FRAME =          " << fram_interval_ms << std::endl;
+        inifile << "MOVIE_FILEE =          " << video_file_path << std::endl;
+        inifile << "MP4VHA =               " << MP4VHA << std::endl;    //録画する時使用するファイル名
+        inifile << "MP4VHAAI =             " << MP4VHAAI << std::endl;  //録画する時使用するファイル名
+        inifile << "MP4HD =                " << MP4HD << std::endl;     //録画する時使用するファイル名
+        inifile << "MP4HDAI =              " << MP4HDAI << std::endl;   //録画する時使用するファイル名
+        inifile << "MP4PATH =              " << MP4PATH << std::endl;   //録画する時使用するファイル名
+        inifile << "WINDOW_MAX =           " << WINDOW_MAX << std::endl;
+        inifile << "CAPTURE_TIMEOUT =      " << CAPOPEN_TIMEOUT << std::endl;
+        //if(yp)
+        inifile << "YOLO_SCORE_THRESHOLD = " << DEFAULT_SCORE_THRESHOLD << std::endl;
+        inifile << "YOLO_NMS_THRESHOLD =   " << DEFAULT_NMS_THRESHOLD << std::endl;
+        inifile << "YOLO_CONF_THRESHOLD =  " << DEFAULT_CONF_THRESHOLD << std::endl;
+        inifile.close();
+    }
+    else
+    {
+        std::ifstream inifile;
+        char buf[2048];
+        inifile.open(INIFILE, std::ios::in);
+        if (inifile.is_open())
+        {
+            while (inifile.getline(buf, 2048))
+            {
+                std::string paramator_name;
+                std::string dummy;
+                std::string paramator_value;
+
+                std::istringstream iline(buf);
+                iline >> paramator_name;
+                iline >> dummy;
+                iline >> paramator_value;
+
+                if (paramator_name == "AI_MODE")
+                {
+                    if (paramator_value == "POSE_NET")
+                        DrawCycleMode = DRAWCYCLE_POSENET;
+                    else if (paramator_value == "POSE")
+                        DrawCycleMode = DRAWCYCLE_POSENET;
+                    else if (paramator_value == "OBJECT_DETECTION")
+                        DrawCycleMode = DRAWCYCLE_YOLO5;
+                    else if (paramator_value == "YOLOV")
+                        DrawCycleMode = DRAWCYCLE_YOLO5;
+                    else if (paramator_value == "YOLOV5")
+                        DrawCycleMode = DRAWCYCLE_YOLO5;
+
+                    else if (paramator_value == "OBJECT_DETECTION_YOLOV8")
+                        DrawCycleMode = DRAWCYCLE_YOLO8;
+                    else if (paramator_value == "YOLOV8")
+                        DrawCycleMode = DRAWCYCLE_YOLO8;
+
+                    else if (paramator_value == "STREAM")
+                        DrawCycleMode = DRAWCYCLE_STREAM;
+                    else
+                        DrawCycleMode = DRAWCYCLE_STREAM;
+                }
+                else if (paramator_name == "VIEW_MODE")
+                {
+                    if (paramator_value == "4")
+                        ViewMode = IDM_VIEW_4;
+                    else if (paramator_value == "6")
+                        ViewMode = IDM_VIEW_6;
+                    else if (paramator_value == "9")
+                        ViewMode = IDM_VIEW_9;
+                    else if (paramator_value == "12")
+                        ViewMode = IDM_VIEW_12;
+                    else if (paramator_value == "16")
+                        ViewMode = IDM_VIEW_16;
+                    else if (paramator_value == "36")
+                        ViewMode = IDM_VIEW_36;
+                    else if (paramator_value == "64")
+                        ViewMode = IDM_VIEW_64;
+                    else
+                        ViewMode = IDM_VIEW_1;
+                }
+                else if (paramator_name == "WINDOW_MAX")
+                {
+                    if (paramator_value == "1")
+                        WINDOW_MAX = 1;
+                    else
+                        WINDOW_MAX = 0;
+                }
+                else if (paramator_name == "STREAM_LIST_FILE")      url_file = paramator_value;
+                else if (paramator_name == "ONNX_FILE")             onnx_file = paramator_value;
+                else if (paramator_name == "NAMES_FILE")            names_file = paramator_value;
+                else if (paramator_name == "ONNX_FILE_YOLOV8")      onnx_file8 = paramator_value;
+                else if (paramator_name == "NAMES_FILE_YOLOV8")     names_file8 = paramator_value;
+                else if (paramator_name == "DISPLAY_TIME[SECOND]")  display_time_seconds = std::stoi(paramator_value);
+                else if (paramator_name == "POSE_WEIGHT_FILE")      poseweight = paramator_value;
+                else if (paramator_name == "POSE_PROTO_FILE")       poseproto = paramator_value;
+                else if (paramator_name == "SLEEP_FRAME")           fram_interval_ms = std::stoi(paramator_value);
+                else if (paramator_name == "MOVIE_FILEE")           video_file_path = paramator_value;
+                else if (paramator_name == "MP4VHA")                MP4VHA = paramator_value;
+                else if (paramator_name == "MP4VHAAI")              MP4VHAAI = paramator_value;
+                else if (paramator_name == "MP4HD")                 MP4HD = paramator_value;
+                else if (paramator_name == "MP4HDAI")               MP4HDAI = paramator_value;
+                else if (paramator_name == "MP4PATH")               MP4PATH = paramator_value;
+                else if (paramator_name == "CAPTURE_TIMEOUT")       CAPOPEN_TIMEOUT = std::stoi(paramator_value);
+                else if (paramator_name == "YOLO_SCORE_THRESHOLD")  DEFAULT_SCORE_THRESHOLD = std::stof(paramator_value);
+                else if (paramator_name == "YOLO_NMS_THRESHOLD")    DEFAULT_NMS_THRESHOLD = std::stof(paramator_value);
+                else if (paramator_name == "YOLO_CONF_THRESHOLD")   DEFAULT_CONF_THRESHOLD = std::stof(paramator_value);
+            }
+        }
+    }
+    return 0;
+}
+
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -67,23 +266,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
-    pAICSV = new std::ofstream(CSVFILE, std::ios_base::app);
+    if(0)
+        pAICSV = new std::ofstream(CSVFILE, std::ios_base::app); //追加書き込み
+    else
+        pAICSV = new std::ofstream(CSVFILE, std::ios_base::out); //上書き
 
     // TODO: ここにコードを挿入してください。
-    /*
-    ■引数が一つもない
-    ・デフォルトの引数を設定
-    ■引数が足りない
-    ・リストだけ、
-    ■カメラリストファイルが無い
-    ・動画モードで起動
-    ・メッセージを出す
-    ■onnx、namesファイルがない
-    ・AI無しで起動する(将来)
-    ・いまは終了
-    ・メッセージを出す
-    */
-
+   
     // コマンドライン引数を取得
     LPWSTR _lpCmdLine = GetCommandLineW();
     // コマンドライン引数を個々の引数に分解
@@ -94,15 +283,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         std::wcerr << L"CommandLineToArgvW failed" << std::endl;
         return 1;
     }
-    //初期値の設定
+    //コード埋め込み初期値の設定
     url_file = _AI_CAMS;
     onnx_file = _AI_ONNX;
     names_file = _AI_NAMES;
+    onnx_file8 = _AI_ONNX8;
+    names_file8 = _AI_NAMES8;
+
+    //前回設定の読み込み
+    read_write_file(INIFILE, RWFILE_READ);
 
     int i = 0;
     for (i = 0; i < nArgs; i++)
     {
         //int msgboxID2 = MessageBox(NULL, szArglist[i], L"test", MB_ICONWARNING | MB_OK);
+        ///////////////////////////////////////////////////////////////////////////////
+        //カメラ -L -F -C
         if (   wcscmp(szArglist[i], L"-l")==0
             || wcscmp(szArglist[i], L"-list") == 0)
         {
@@ -110,6 +306,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             url_file = _fp.string();
             i++;
         }
+        else if (wcscmp(szArglist[i], L"-f") == 0
+            || wcscmp(szArglist[i], L"-frame") == 0)
+        {
+            fram_interval_ms = _wtoi(szArglist[i + 1]);
+            i++;
+        }
+        else if (wcscmp(szArglist[i], L"-c") == 0
+            || wcscmp(szArglist[i], L"-change") == 0)
+        {
+            display_time_seconds = _wtoi(szArglist[i + 1]);
+            i++;
+        }
+        ///////////////////////////////////////////////////////////////////////////////
+        //YOLO -X -N
         else if (   wcscmp(szArglist[i], L"-x") == 0
             || wcscmp(szArglist[i], L"-onnx") == 0)
         {
@@ -124,25 +334,81 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             names_file = _fp.string();
             i++;
         }
-        else if (wcscmp(szArglist[i], L"-f") == 0
-            || wcscmp(szArglist[i], L"-frame") == 0)
-        {
-            sleep = _wtoi(szArglist[i+1]);
+        ///////////////////////////////////////////////////////////////////////////////
+        //POSE NET -PW -PP
+        else if (wcscmp(szArglist[i], L"-pw") == 0
+            || wcscmp(szArglist[i], L"-PW") == 0
+            || wcscmp(szArglist[i], L"-poseweight") == 0
+            || wcscmp(szArglist[i], L"-POSEWEIGHT") == 0)
+            {
+            std::filesystem::path _fp(szArglist[i + 1]);
+            poseweight = _fp.string();
+
+            if (!std::filesystem::exists(poseweight))
+            {
+                CA2W wStr(poseweight.c_str());
+                int msgboxID = MessageBox(NULL, wStr, (LPCWSTR)L"NAMESファイルがありません", MB_ICONWARNING | MB_OK);
+                return 0;
+            }
             i++;
         }
-        else if (wcscmp(szArglist[i], L"-c") == 0
-            || wcscmp(szArglist[i], L"-change") == 0)
+        else if (wcscmp(szArglist[i], L"-pp") == 0
+            || wcscmp(szArglist[i], L"-PP") == 0
+            || wcscmp(szArglist[i], L"-poseproto") == 0
+            || wcscmp(szArglist[i], L"-POSEPROTO") == 0)
         {
-            display_time_seconds = _wtoi(szArglist[i+1]);
+            std::filesystem::path _fp(szArglist[i + 1]);
+            std::string _str = _fp.string();
+            //_PoseNet.set_protoFile(_str);
+            poseproto = _fp.string();
+            //_PoseNet.get_weightsFile() = _fp.string();
+            //_PoseNet.weightsFile = _fp.string();
+            if (!std::filesystem::exists(poseproto))
+            {
+                CA2W wStr(poseproto.c_str());
+                int msgboxID = MessageBox(NULL, wStr, (LPCWSTR)L"NAMESファイルがありません", MB_ICONWARNING | MB_OK);
+                return 0;
+            }
             i++;
         }
- 
+        ///////////////////////////////////////////////////////////////////////////////
+        //モード -S -M -P -Y
         else if (wcscmp(szArglist[i], L"-m") == 0
-            || wcscmp(szArglist[i], L"-movie") == 0)
+              || wcscmp(szArglist[i], L"-movie") == 0)
         {
             appmode = APPMODE_MOVFILE;
             int msgboxID = MessageBox(NULL, L"動画ファイル読み込みモードで起動します。\n起動後、ファイルメニューから動画ファイルを指定してください。", L"StreamViewerAI2.exe", MB_ICONWARNING | MB_OK);
         }
+        else if (wcscmp(szArglist[i], L"-s") == 0
+            || wcscmp(szArglist[i], L"-stream") == 0)
+        {
+            DrawCycleMode = DRAWCYCLE_STREAM;
+            i++;
+        }
+        else if (wcscmp(szArglist[i], L"-p") == 0
+            || wcscmp(szArglist[i], L"-pose") == 0)
+        {
+            DrawCycleMode = DRAWCYCLE_POSENET;
+            i++;
+        }
+        else if (wcscmp(szArglist[i], L"-y") == 0
+            || wcscmp(szArglist[i], L"-yolo") == 0)
+        {
+            DrawCycleMode = DRAWCYCLE_YOLO5;
+            i++;
+        }
+        ///////////////////////////////////////////////////////////////////////////////
+        //モード -4
+        else if (wcscmp(szArglist[i], L"-1") == 0 || wcscmp(szArglist[i], L"-1view") == 0 || wcscmp(szArglist[i], L"-1VIEW") == 0) { ViewMode = IDM_VIEW_1; }
+        else if (wcscmp(szArglist[i], L"-4") == 0 || wcscmp(szArglist[i], L"-4view") == 0 || wcscmp(szArglist[i], L"-4VIEW") == 0) { ViewMode = IDM_VIEW_4; }
+        else if (wcscmp(szArglist[i], L"-6") == 0 || wcscmp(szArglist[i], L"-6view") == 0 || wcscmp(szArglist[i], L"-6VIEW") == 0) { ViewMode = IDM_VIEW_6; }
+        else if (wcscmp(szArglist[i], L"-9") == 0 || wcscmp(szArglist[i], L"-9view") == 0 || wcscmp(szArglist[i], L"-9VIEW") == 0) { ViewMode = IDM_VIEW_9; }
+        else if (wcscmp(szArglist[i], L"-12") == 0 || wcscmp(szArglist[i], L"-12view") == 0 || wcscmp(szArglist[i], L"-12VIEW") == 0) { ViewMode = IDM_VIEW_12; }
+        else if (wcscmp(szArglist[i], L"-16") == 0 || wcscmp(szArglist[i], L"-16view") == 0 || wcscmp(szArglist[i], L"-16VIEW") == 0) { ViewMode = IDM_VIEW_16; }
+        else if (wcscmp(szArglist[i], L"-36") == 0 || wcscmp(szArglist[i], L"-36view") == 0 || wcscmp(szArglist[i], L"-36VIEW") == 0) { ViewMode = IDM_VIEW_36; }
+        else if (wcscmp(szArglist[i], L"-64") == 0 || wcscmp(szArglist[i], L"-64view") == 0 || wcscmp(szArglist[i], L"-64VIEW") == 0) { ViewMode = IDM_VIEW_64; }
+
+        ///////////////////////////////////////////////////////////////////////////////
         else if (wcscmp(szArglist[i], L"-h") == 0
             || wcscmp(szArglist[i], L"-help") == 0)
         {
@@ -156,12 +422,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 << "EX: StreamViewerAI2.exe -l cams.txt -x yolov5s.onnx -n coco.names" << std::endl
                 << "=======================================" << std::endl
                 << "オプション" << std::endl
+                << "-s,-stream AI処理なし" << std::endl
+                << "-y,-yolo 物体認識(YOLO)" << std::endl
+                << "-p,-pose 姿勢認識(PoseNet)'" << std::endl
                 << "-l,-list 'カメラリストファイル'" << std::endl
                 << "-x,-onnx 'onnxファイル'" << std::endl
                 << "-n,-names 'namesファイル'" << std::endl
+                << "-pw,-poseweight 'PoseNet weight ファイル'" << std::endl
+                << "-pp,-poseproto 'Posenet protoファイル'" << std::endl
                 << "-c,-change 'カメラ切り替え時間時間[sec]'" << std::endl
                 << "-f,-frame 'キャプチャの間隔時間[ms/f]'" << std::endl
                 << "-m,-movie 動画ファイル読み込みモード カメラリストファイルは無視" << std::endl
+                << "=======================================" << std::endl
+                << "-1,-1view,-1VIEW 1画面(デフォルト)" << std::endl
+                << "-4,-4view,-4VIEW 4画面" << std::endl
                 << "=======================================" << std::endl
                 << "カメラリストファイル書き方" << std::endl
                 << "カメラ名称,urlアドレス" << std::endl
@@ -180,7 +454,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         _str_usage << url_file << std::endl
             << onnx_file << std::endl
             << names_file << std::endl
-            <<"sleep[msec]: " << sleep << std::endl
+            <<"sleep[msec]: " << fram_interval_ms << std::endl
             <<"flamerate[fps]: "<< display_time_seconds << std::endl;
         std::string _tmp = _str_usage.str();
         CA2W wStr(_tmp.c_str());
@@ -292,112 +566,498 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    return TRUE;
 }
 
-//グローバル変数
-//extern std::vector<std::string> urls;
-HMENU hMenu;
-static bool isFullscreen = false;
-static RECT windowRect;
-std::thread* _main_th = nullptr;
-volatile bool wm_paint_now = false;
-
-std::vector<std::vector<std::string>> readRecordsFromFile(const std::string& filename) 
+////////////////////////////////////////////////////////////////////////////////
+//ファイル選択ダイアログボックス
+int select_file(HWND hWnd, std::string& _file_path, LPCWSTR _file_pattern)
 {
-    std::vector<std::vector<std::string>> records;
-    std::ifstream inputFile(filename);
+    OPENFILENAME ofn;       // OPENFILENAME 構造体
+    wchar_t szFile[260] = { 0 }; // ファイル名格納用のバッファ
 
-    if (inputFile.is_open()) 
+    // OPENFILENAME 構造体の初期化
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = NULL;  // ダイアログボックスの親ウィンドウ
+    ofn.lpstrFile = szFile;
+    ofn.nMaxFile = sizeof(szFile);
+    ofn.lpstrFilter = _file_pattern; // 表示するファイルの種類
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFileTitle = NULL;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = NULL;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+    // ファイル選択ダイアログボックスの表示
+    if (GetOpenFileName(&ofn) == TRUE)
     {
-        std::string line;
-        while (std::getline(inputFile, line)) 
+        // ファイルが選択されたときの処理
+        if (std::filesystem::exists(ofn.lpstrFile))
         {
-            std::vector<std::string> record;
-            std::istringstream lineStream(line);
-            std::string item;
-
-            while (std::getline(lineStream, item, ',')) 
-            {
-                record.push_back(item);
-            }
-            records.push_back(record);
+            //int msgboxID = MessageBox(NULL, ofn.lpstrFile, (LPCWSTR)L"ファイルがありました", MB_ICONWARNING | MB_OK);
+            _file_path = wstring2string(ofn.lpstrFile);
+            //UpdateWindow(hWnd);
+            //ShowWindow(hWnd, SW_SHOW);
+            //InvalidateRect(hWnd, NULL, TRUE);
+            //DefWindowProc(hWnd, message, wParam, lParam);
+            return 1;
         }
-        inputFile.close();
+        else
+        {
+            int msgboxID = MessageBox(NULL, ofn.lpstrFile, (LPCWSTR)L"ファイルがありません", MB_ICONWARNING | MB_OK);
+            return 0;
+        }
     }
-    else 
-    {
-        std::cerr << "Unable to open file: " << filename << std::endl;
-    }
-    return records;
-}
-
-static std::vector<RECT> monitors;
-BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) 
-{
-    monitors.push_back(*lprcMonitor);
-    return TRUE;
-}
-
-int set_fullscreen(HWND hWnd,int monitor) 
-{
-    // システム上のすべてのモニターを列挙
-    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, 0);
-
-    // 2番目のモニターを選択（存在する場合）
-    if (monitors.size() > monitor) 
-    {
-        isFullscreen = true;
-        // 元のウィンドウサイズと位置を保存
-        GetWindowRect(hWnd, &windowRect);
-        hMenu = GetMenu(hWnd);
-        SetMenu(hWnd, NULL);
-
-        // 2番目のモニターのスクリーン座標を取得
-        RECT monitor_rect = monitors[monitor];
-
-        // ウィンドウを2番目のモニターに移動して全画面表示にする
-        SetWindowLong(hWnd, GWL_STYLE, WS_POPUP);
-
-        SetWindowPos(hWnd, HWND_TOP, monitor_rect.left, monitor_rect.top, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), SWP_FRAMECHANGED);
-
-        // ウィンドウを表示
-        ShowWindow(hWnd, SW_SHOW);
-        InvalidateRect(hWnd, NULL, TRUE);
-    }
-    monitors.clear();
     return 0;
 }
 
-/*
-    wstringをstringへ変換
-*/
-std::string wstring2string(std::wstring oWString)
+#define AI_LOAD 1
+#define AI_UNLOAD 2
+int load_YoloObjectDetection(int _load);
+int load_PoseNet(int _load);
+
+////////////////////////////////////////////////////////////////////////////////
+//フラグをセットし、再描画イベントを発生させる
+int PROC_START(HWND hWnd)
 {
-    // wstring → SJIS
-    int iBufferSize = WideCharToMultiByte(CP_OEMCP, 0, oWString.c_str(), -1, (char*)NULL, 0, NULL, NULL);
-    // バッファの取得
-    CHAR* cpMultiByte = new CHAR[iBufferSize];
-    // wstring → SJIS
-    WideCharToMultiByte(CP_OEMCP, 0, oWString.c_str(), -1, cpMultiByte, iBufferSize, NULL, NULL);
-    // stringの生成
-    std::string oRet(cpMultiByte, cpMultiByte + iBufferSize - 1);
-    // バッファの破棄
-    delete[] cpMultiByte;
-    // 変換結果を返す
-    return(oRet);
+    if (DrawCycleMode ==  DRAWCYCLE_YOLO5)
+        load_YoloObjectDetection(AI_LOAD);
+    else if (DrawCycleMode == DRAWCYCLE_YOLO8)
+        load_YoloObjectDetection(AI_LOAD);
+    else if (DrawCycleMode == DRAWCYCLE_POSENET)
+        load_PoseNet(AI_LOAD);
+    else
+        /*no action*/;
+
+    set_cvw_stop(false);
+    UpdateWindow(hWnd);
+    ShowWindow(hWnd, SW_SHOW);
+    InvalidateRect(hWnd, NULL, TRUE);
+    return 0;
+}
+////////////////////////////////////////////////////////////////////////////////
+int PROC_STOP()
+{
+    set_cvw_stop(true);
+    
+    //ビデオキャプチャークラスを閉じる
+    while (Count_VideoCapture > 0)
+    {
+        //DoEvents();
+        Sleep(100);
+    }
+    //ビデオライタークラスを閉じる
+    mvw_org.release();
+    mvw_ai.release();
+    
+    for (int i = 0; i < VIEWMAX; i++)
+    {
+        if (main_th[i] != nullptr)
+        {
+            svw_wait_stop();
+            if(main_th[i]->joinable())
+                main_th[i]->join();
+            delete main_th[i];
+            main_th[i] = nullptr;
+        }
+    }
+
+    if (DrawCycleMode == DRAWCYCLE_YOLO5)
+        load_YoloObjectDetection(AI_UNLOAD);
+    else if (DrawCycleMode == DRAWCYCLE_YOLO8)
+        load_YoloObjectDetection(AI_UNLOAD);
+    else if (DrawCycleMode == DRAWCYCLE_POSENET)
+        load_PoseNet(AI_UNLOAD);
+    else
+        /*no action*/;
+  
+    return 0;
 }
 
-std::string _video_file_path = "";
+////////////////////////////////////////////////////////////////////////////////
+//
+int load_YoloObjectDetection(int _load)
+{
+    if (_load == AI_LOAD)
+    {
+        pt_YoloObjectDetection = new YoloObjectDetection;
+        YoloAIParametors yp;
+        if (DrawCycleMode == DRAWCYCLE_YOLO8)
+        {
+            yp.yolo_version = YOLOV8;
+            yp.onnx_file_name = onnx_file8.c_str();
+            yp.names_file_name = names_file8.c_str();
+        }
+        else //YOLOV5
+        {
+            yp.yolo_version = YOLOV5;
+            yp.onnx_file_name = onnx_file.c_str();
+            yp.names_file_name = names_file.c_str();
+        }
 
-//  関数: WndProc(HWND, UINT, WPARAM, LPARAM)
-//  目的: メイン ウィンドウのメッセージを処理します。
-//  WM_COMMAND  - アプリケーション メニューの処理
-//  WM_PAINT    - メイン ウィンドウを描画する
-//  WM_DESTROY  - 中止メッセージを表示して戻る
+        yp.input_width = DEFAULT_AI_INPUT_WIDTH;
+        yp.input_height = DEFAULT_AI_INPUT_HEIGHT;
+        yp.score_threshold = (float)DEFAULT_SCORE_THRESHOLD;
+        yp.nms_threshold = (float)DEFAULT_NMS_THRESHOLD;
+        yp.confidence_thresgold = (float)DEFAULT_CONF_THRESHOLD;
+        _ai_running = pt_YoloObjectDetection->init_yolov5(yp, true, false);
+    }
+    else if (_load == AI_UNLOAD)
+    {
+        if (pt_YoloObjectDetection != nullptr)
+        {
+            delete pt_YoloObjectDetection;
+            pt_YoloObjectDetection = nullptr;
+        }
+    }
+    return 0;
+}
+////////////////////////////////////////////////////////////////////////////////
+int load_PoseNet(int _load)
+{
+    if (_load == AI_LOAD)
+    {
+        _ptg_posenet = new PoseNet;
+        _ptg_posenet->init(poseproto, poseweight, USE_GPU);
+    }
+    else if(_load==AI_UNLOAD)
+    { 
+        if (_ptg_posenet != nullptr)
+        {
+            delete _ptg_posenet;
+            _ptg_posenet = nullptr;
+        }
+    }
+    return 0;
+}
+////////////////////////////////////////////////////////////////////////////////
+// _org_strと_add_strをくっつけてメニュー項目に適用
+BOOL set_menu_string(HWND hWnd, UINT _idm, LPCSTR _org_str, std::string& _add_str)
+{
+
+    std::ostringstream _menu_wsstr;
+    _menu_wsstr << _org_str
+        << "("
+        << _add_str.c_str()
+        << ")" << std::ends;
+    std::wstring _menu_str = stringToWstring(_menu_wsstr.str());
+   
+    return ModifyMenu(GetMenu(hWnd), _idm, MF_STRING, _idm, (LPCWSTR)_menu_str.c_str());
+
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//メニューにチェックマークを付ける処理
+#define DTSM(a) set_display_time_seconds_menuitems(a)
+int set_display_time_seconds_menuitems(HWND hWnd)
+{
+    HMENU hMenu = GetMenu(hWnd);
+
+    CheckMenuItem(hMenu, IDM_C_000, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_C_001, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_C_003, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_C_008, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_C_015, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_C_030, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_C_060, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_C_120, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_C_300, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_C_600, MF_UNCHECKED);
+
+    if (get_display_time_seconds() ==  0)CheckMenuItem(hMenu, IDM_C_000, MF_CHECKED);
+    if (get_display_time_seconds() ==  1)CheckMenuItem(hMenu, IDM_C_001, MF_CHECKED);
+    if (get_display_time_seconds() ==  3)CheckMenuItem(hMenu, IDM_C_003, MF_CHECKED);
+    if (get_display_time_seconds() ==  8)CheckMenuItem(hMenu, IDM_C_008, MF_CHECKED);
+    if (get_display_time_seconds() == 15)CheckMenuItem(hMenu, IDM_C_015, MF_CHECKED);
+    if (get_display_time_seconds() == 30)CheckMenuItem(hMenu, IDM_C_030, MF_CHECKED);
+    if (get_display_time_seconds() == 60)CheckMenuItem(hMenu, IDM_C_060, MF_CHECKED);
+    if (get_display_time_seconds() ==120)CheckMenuItem(hMenu, IDM_C_120, MF_CHECKED);
+    if (get_display_time_seconds() ==300)CheckMenuItem(hMenu, IDM_C_300, MF_CHECKED);
+    if (get_display_time_seconds() ==600)CheckMenuItem(hMenu, IDM_C_600, MF_CHECKED);
+
+//    if (_IDM != 0)
+//        CheckMenuItem(hMenu, _IDM, MF_CHECKED);
+
+    DrawMenuBar(hWnd);
+    return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//メニューにチェックマークを付ける処理
+#define FBTM(a) set_frame_between_time_menuitems(a)
+int set_frame_between_time_menuitems(HWND hWnd)
+{
+    HMENU hMenu = GetMenu(hWnd);
+
+    CheckMenuItem(hMenu, IDM_F_0003, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_F_0005, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_F_0008, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_F_0010, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_F_0020, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_F_0100, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_F_0200, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_F_0300, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_F_0600, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_F_1200, MF_UNCHECKED);
+
+    if (get_frame_between_time() ==3000)CheckMenuItem(hMenu, IDM_F_0003, MF_CHECKED);
+    if (get_frame_between_time() ==2000)CheckMenuItem(hMenu, IDM_F_0005, MF_CHECKED);
+    if (get_frame_between_time() ==1500)CheckMenuItem(hMenu, IDM_F_0008, MF_CHECKED);
+    if (get_frame_between_time() ==1000)CheckMenuItem(hMenu, IDM_F_0010, MF_CHECKED);
+    if (get_frame_between_time() ==500 )CheckMenuItem(hMenu, IDM_F_0020, MF_CHECKED);
+    if (get_frame_between_time() ==100 )CheckMenuItem(hMenu, IDM_F_0100, MF_CHECKED);
+    if (get_frame_between_time() ==50  )CheckMenuItem(hMenu, IDM_F_0200, MF_CHECKED);
+    if (get_frame_between_time() ==33  )CheckMenuItem(hMenu, IDM_F_0300, MF_CHECKED);
+    if (get_frame_between_time() ==16  )CheckMenuItem(hMenu, IDM_F_0600, MF_CHECKED);
+    if (get_frame_between_time() ==8   )CheckMenuItem(hMenu, IDM_F_1200, MF_CHECKED);
+
+    DrawMenuBar(hWnd);
+    return 0;
+}
+////////////////////////////////////////////////////////////////////////////////
+//メニューにチェックマークを付ける処理
+int STHM(HWND hWnd)
+{
+    HMENU hMenu = GetMenu(hWnd);
+
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_000, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_010, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_020, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_030, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_040, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_050, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_060, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_070, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_080, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_090, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_100, MF_UNCHECKED);
+
+    if (pt_YoloObjectDetection != nullptr)
+    {
+        if (pt_YoloObjectDetection->YP.score_threshold == 0.001f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_000, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.score_threshold == 0.1f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_010, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.score_threshold == 0.2f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_020, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.score_threshold == 0.3f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_030, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.score_threshold == 0.4f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_040, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.score_threshold == 0.5f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_050, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.score_threshold == 0.6f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_060, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.score_threshold == 0.7f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_070, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.score_threshold == 0.8f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_080, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.score_threshold == 0.9f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_090, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.score_threshold == 1.0f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_100, MF_CHECKED);
+    }
+    DrawMenuBar(hWnd);
+    return 0;
+}
+////////////////////////////////////////////////////////////////////////////////
+//メニューにチェックマークを付ける処理
+int SNHM(HWND hWnd)
+{
+    HMENU hMenu = GetMenu(hWnd);
+
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_000, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_010, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_020, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_030, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_040, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_050, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_060, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_070, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_080, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_090, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_100, MF_UNCHECKED);
+
+    if (pt_YoloObjectDetection != nullptr)
+    {
+        if (pt_YoloObjectDetection->YP.nms_threshold == 0.1f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_000, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.nms_threshold == 0.1f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_010, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.nms_threshold == 0.2f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_020, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.nms_threshold == 0.3f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_030, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.nms_threshold == 0.4f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_040, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.nms_threshold == 0.5f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_050, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.nms_threshold == 0.6f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_060, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.nms_threshold == 0.7f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_070, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.nms_threshold == 0.8f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_080, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.nms_threshold == 0.9f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_090, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.nms_threshold == 1.0f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_100, MF_CHECKED);
+    }
+
+    DrawMenuBar(hWnd);
+    return 0;
+}
+////////////////////////////////////////////////////////////////////////////////
+//メニューにチェックマークを付ける処理
+int SCHM(HWND hWnd)
+{
+    HMENU hMenu = GetMenu(hWnd);
+
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_000, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_010, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_020, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_030, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_040, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_050, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_060, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_070, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_080, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_090, MF_UNCHECKED);
+    CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_100, MF_UNCHECKED);
+
+    if (pt_YoloObjectDetection != nullptr)
+    {
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.001f)CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_000, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.1f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_010, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.2f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_020, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.3f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_030, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.4f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_040, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.5f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_050, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.6f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_060, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.7f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_070, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.8f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_080, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.9f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_090, MF_CHECKED);
+        if (pt_YoloObjectDetection->YP.confidence_thresgold == 1.0f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_100, MF_CHECKED);
+    }
+
+    DrawMenuBar(hWnd);
+    return 0;
+}
+////////////////////////////////////////////////////////////////////////////////
+//メニューにファイル名を付ける処理
+int set_file_menu_items(HWND hWnd)
+{
+    set_menu_string(hWnd, IDM_FILE_CAMS, "カメラリストファイルを選択(&L)", url_file);
+    set_menu_string(hWnd, IDM_FILE_ONNX, "物体認識AIモデルファイル(onnx)を選択(&O)", onnx_file);
+    set_menu_string(hWnd, IDM_FILE_NAMES, "物体認識AI名前ファイル(names)を選択(&N)",  names_file);
+    set_menu_string(hWnd, IDM_FILE_ONNX8, "物体追跡AIモデルファイル(onnx)を選択(&O)", onnx_file8);
+    set_menu_string(hWnd, IDM_FILE_NAMES8, "物体追跡AI名前ファイル(names)を選択(&N)", names_file8);
+    set_menu_string(hWnd, IDM_FILE_POSEWEIGHT, "ポーズAIモデルファイル(caffemodel)を選択(&P)",  poseweight);
+    set_menu_string(hWnd, IDM_FILE_POSEPROTO, "ポーズAI定義ファイル(prototxt)を選択(&R)",    poseproto);
+
+    return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//画面分割表示のためにカメラリストの配列を分割する
+typedef std::vector<std::vector<std::string>> T_CAM_URLS; //文字列の 2次元配列
+std::vector<T_CAM_URLS> splitIntoN(const T_CAM_URLS& _vec, int _n)
+{
+    std::vector<T_CAM_URLS> _result(_n);
+    size_t length = _vec.size() / _n;
+    size_t remain = _vec.size() % _n;
+
+    size_t begin = 0;
+    size_t end = 0;
+
+    for (int i = 0; i < _n; ++i) {
+        end = begin + length + (remain > 0 ? 1 : 0);
+        if (remain > 0) remain--;
+
+        _result[i] = T_CAM_URLS(_vec.begin() + begin, _vec.begin() + end);
+        begin = end;
+    }
+    return _result;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//カメラ選択メニューにカメラ名を追加する
+//IDM_CAM_001
+//IDM_CAM_POP_1
+#define CAMERA_POS_IN_MAINMENU 2
+int set_camera_menu(HWND hWnd,T_CAM_URLS& _cam_urls)
+{
+    HMENU _hMainMenubar = GetMenu(hWnd); // メインメニュー
+    HMENU _hSubMenu = GetSubMenu(_hMainMenubar, CAMERA_POS_IN_MAINMENU); // メインメニューの2番目のサブメニュー　
+    HMENU _hPupSubMenu = CreatePopupMenu();//ポップアップメニュー　初期化は仮
+
+    std::wstring _sub_menu_title[10] = {
+        L"カメラ　01-10(&0)",
+        L"カメラ　11-20(&1)",
+        L"カメラ　21-30(&2)",
+        L"カメラ　31-40(&3)",
+        L"カメラ　41-50(&4)",
+        L"カメラ　51-60(&5)",
+        L"カメラ　61-70(&6)",
+        L"カメラ　71-80(&7)",
+        L"カメラ　81-90(&8)",
+        L"カメラ　91-100(&9)" };
+
+    int _count=0;
+    int _count_max =(int) _cam_urls.size();
+    int _count_pop = 0;
+
+    for (int _count = 0; _count < MIN(_count_max,100); _count++)
+    {
+        //ポップアップメニューの追加のためのハンドル生成
+        if (_count % 10 == 0)
+        {
+            _hPupSubMenu = CreatePopupMenu();
+        }
+
+        int _shortcut_key_number = _count % 10+1;
+        if (_shortcut_key_number == 10)_shortcut_key_number = 0;
+
+        std::wstringstream _menu_strstream;
+        _menu_strstream << "(&"<< _shortcut_key_number <<")";
+        _menu_strstream << stringToWstring(_cam_urls[_count][0].c_str());
+        _menu_strstream << L" (";
+        _menu_strstream << stringToWstring(_cam_urls[_count][1].c_str());
+        _menu_strstream << L")";
+        //_menu_strstream << L" "<< _count + IDM_CAM_001; //ID番号の表示
+        std::wstring _menu_str = _menu_strstream.str();
+        AppendMenu(_hPupSubMenu, MF_STRING, _count + IDM_CAM_001, (LPCWSTR)_menu_str.c_str());
+
+        //ポップアップメニューの追加
+        if (_count % 10 == 0)
+        {
+            MENUITEMINFO mii = { 0 };
+            mii.cbSize = sizeof(MENUITEMINFO);
+            mii.fMask = MIIM_SUBMENU | MIIM_STRING | MIIM_ID;
+            mii.wID = IDM_CAM_POP_1 + _count_pop;
+            mii.hSubMenu = _hPupSubMenu;
+            mii.dwTypeData = _wcsdup(_sub_menu_title[_count_pop].c_str());
+            InsertMenuItem(_hSubMenu, _count_pop + IDM_CAM_POP_1, TRUE, &mii);
+            _count_pop++;
+        }
+    }
+     return 0;
+}
+
+int view_single_cam(HWND hWnd, int _cam_id)
+{
+    ViewMode = IDM_VIEW_1;
+    PROC_STOP();
+    PROC_FIX_CAM(_cam_id-1);
+    PROC_CYCLE(false);
+    PROC_START(hWnd);
+    return 0;
+}
+
+std::vector<T_CAM_URLS> splitIntoFour(const T_CAM_URLS& vec) 
+{
+    std::vector<T_CAM_URLS> result(4);
+    size_t length = vec.size() / 4;
+    size_t remain = vec.size() % 4;
+
+    size_t begin = 0;
+    size_t end = 0;
+
+    for (int i = 0; i < 4; ++i) {
+        end = begin + length + (remain > 0 ? 1 : 0);
+        if (remain > 0) remain--;
+
+        result[i] = T_CAM_URLS(vec.begin() + begin, vec.begin() + end);
+        begin = end;
+    }
+    return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//ウィンドウプロシージャ システムからのコールを処理する。
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     //std::vector<std::string> urls;
 
-    OPENFILENAME ofn;       // OPENFILENAME 構造体
+    //OPENFILENAME ofn;       // OPENFILENAME 構造体
     wchar_t szFile[260] = { 0 }; // ファイル名格納用のバッファ
+    HMENU _hMenu; //グローバルにもあるので注意
 
     switch (message)
     {
@@ -414,136 +1074,468 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 DestroyWindow(hWnd);
                 break;
 
+            case IDM_MODE_STREAM:
+                appmode = APPMODE_NETCAM; //IPカメラにする とりあえずここに入れるが、モード切替のユーザーインターフェースは検討中
+                DrawCycleMode = DRAWCYCLE_STREAM;
+                PROC_STOP();
+                PROC_START(hWnd);
+                break;
+            case IDM_MODE_YOLO:
+                DrawCycleMode = DRAWCYCLE_YOLO5;
+                PROC_STOP();
+                PROC_START(hWnd);
+                break;
+            case IDM_MODE_YOLO8:
+                DrawCycleMode = DRAWCYCLE_YOLO8;
+                PROC_STOP();
+                PROC_START(hWnd);
+                break;
+            case IDM_MODE_POSE:
+                DrawCycleMode = DRAWCYCLE_POSENET;
+                PROC_STOP();
+                PROC_START(hWnd);
+                break;
+
+            case IDM_STREAM_START:
+                PROC_START(hWnd);
+                break;
+            case IDM_STREAM_STOP:
+                PROC_STOP();
+                break;
+            case IDM_VIEW_1:
+                ViewMode = IDM_VIEW_1;
+                PROC_STOP();
+                PROC_FIX_CAM(-1);
+                PROC_CYCLE(true);
+                PROC_START(hWnd);
+                _hMenu = GetMenu(hWnd);
+                CheckMenuItem(_hMenu, IDM_VIEW_1, MF_CHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_4, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_6, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_9, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_12, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_16, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_36, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_64, MF_UNCHECKED);
+                DrawMenuBar(hWnd);
+                break;
+            case IDM_VIEW_4:
+                ViewMode = IDM_VIEW_4;
+                PROC_STOP();
+                PROC_FIX_CAM(-1);
+                PROC_CYCLE(true);
+                PROC_START(hWnd);
+                _hMenu = GetMenu(hWnd);
+                CheckMenuItem(_hMenu, IDM_VIEW_1, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_4, MF_CHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_6, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_9, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_12, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_16, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_36, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_64, MF_UNCHECKED);
+                DrawMenuBar(hWnd);
+                break;
+            case IDM_VIEW_6:
+                ViewMode = IDM_VIEW_6;
+                PROC_STOP();
+                PROC_FIX_CAM(-1);
+                PROC_CYCLE(true);
+                PROC_START(hWnd);
+                _hMenu = GetMenu(hWnd);
+                CheckMenuItem(_hMenu, IDM_VIEW_1, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_4, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_6, MF_CHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_9, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_12, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_16, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_36, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_64, MF_UNCHECKED);
+                DrawMenuBar(hWnd);
+                break;
+            case IDM_VIEW_9:
+                ViewMode = IDM_VIEW_9;
+                PROC_STOP();
+                PROC_FIX_CAM(-1);
+                PROC_CYCLE(true);
+                PROC_START(hWnd);
+                _hMenu = GetMenu(hWnd);
+                CheckMenuItem(_hMenu, IDM_VIEW_1, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_4, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_6, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_9, MF_CHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_12, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_16, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_36, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_64, MF_UNCHECKED);
+                DrawMenuBar(hWnd);
+                break;
+            case IDM_VIEW_12:
+                ViewMode = IDM_VIEW_12;
+                PROC_STOP();
+                PROC_FIX_CAM(-1);
+                PROC_CYCLE(true);
+                PROC_START(hWnd);
+                _hMenu = GetMenu(hWnd);
+                CheckMenuItem(_hMenu, IDM_VIEW_1, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_4, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_6, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_9, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_12, MF_CHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_16, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_36, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_64, MF_UNCHECKED);
+                DrawMenuBar(hWnd);
+                break;
+            case IDM_VIEW_16:
+                ViewMode = IDM_VIEW_16;
+                PROC_STOP();
+                PROC_FIX_CAM(-1);
+                PROC_CYCLE(true);
+                PROC_START(hWnd);
+                _hMenu = GetMenu(hWnd);
+                CheckMenuItem(_hMenu, IDM_VIEW_1, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_4, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_6, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_9, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_12, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_16, MF_CHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_36, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_64, MF_UNCHECKED);
+                DrawMenuBar(hWnd);
+                break;
+            case IDM_VIEW_36:
+                ViewMode = IDM_VIEW_36;
+                PROC_STOP();
+                PROC_FIX_CAM(-1);
+                PROC_CYCLE(true);
+                PROC_START(hWnd);
+                _hMenu = GetMenu(hWnd);
+                CheckMenuItem(_hMenu, IDM_VIEW_1, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_4, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_6, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_9, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_12, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_16, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_36, MF_CHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_64, MF_UNCHECKED);
+                DrawMenuBar(hWnd);
+                break;
+            case IDM_VIEW_64:
+                ViewMode = IDM_VIEW_64;
+                PROC_STOP();
+                PROC_FIX_CAM(-1);
+                PROC_CYCLE(true);
+                PROC_START(hWnd);
+                _hMenu = GetMenu(hWnd);
+                CheckMenuItem(_hMenu, IDM_VIEW_1, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_4, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_6, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_9, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_12, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_16, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_36, MF_UNCHECKED);
+                CheckMenuItem(_hMenu, IDM_VIEW_64, MF_CHECKED);
+                DrawMenuBar(hWnd);
+                break;
+
+
             case IDM_INPUTFILE:
-
-                // OPENFILENAME 構造体の初期化
-                ZeroMemory(&ofn, sizeof(ofn));
-                ofn.lStructSize = sizeof(ofn);
-                ofn.hwndOwner = NULL;  // ダイアログボックスの親ウィンドウ
-                ofn.lpstrFile = szFile;
-                ofn.nMaxFile = sizeof(szFile);
-                ofn.lpstrFilter = L"All\0*.*\0MP4\0*.mp4\0MPG\0*.mpg\0MOV\0*.mov\0"; // 表示するファイルの種類
-                ofn.nFilterIndex = 1;
-                ofn.lpstrFileTitle = NULL;
-                ofn.nMaxFileTitle = 0;
-                ofn.lpstrInitialDir = NULL;
-                ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-
-                // ファイル選択ダイアログボックスの表示
-                if (GetOpenFileName(&ofn) == TRUE) 
+                if (select_file(hWnd, video_file_path, L"MP4\0*.mp4\0MPG\0*.mpg\0MOV\0*.mov\0All\0*.*\0"))
                 {
-                    // ファイルが選択されたときの処理
-                    if (std::filesystem::exists(ofn.lpstrFile))
-                    {
-                        //int msgboxID = MessageBox(NULL, ofn.lpstrFile, (LPCWSTR)L"ファイルがありました", MB_ICONWARNING | MB_OK);
-                        _video_file_path = wstring2string(ofn.lpstrFile);
-
-                        appmode = APPMODE_MOVFILE;
-
-                        UpdateWindow(hWnd);
-                        ShowWindow(hWnd, SW_SHOW);
-                        InvalidateRect(hWnd, NULL, TRUE);
-                        cvw_file_end = false;
-
-                        //DefWindowProc(hWnd, message, wParam, lParam);
-                    }
-                    else
-                    {
-                        int msgboxID = MessageBox(NULL, ofn.lpstrFile, (LPCWSTR)L"ファイルがありません", MB_ICONWARNING | MB_OK);
-                        appmode = APPMODE_NETCAM;
-                    }
+                    appmode = APPMODE_MOVFILE;
+                    PROC_START(hWnd);
+                    cvw_file_end = false;
                 }
-
+                else
+                    appmode = APPMODE_NETCAM;
+                break;
+            case IDM_FILE_CAMS:         
+                if (select_file(hWnd, url_file, L"TXT\0*.txt\0All\0*.*\0"))
+                {
+                    PROC_STOP();
+                    cam_urls = readRecordsFromFile(url_file);
+                    PROC_START(hWnd);
+                    set_file_menu_items(hWnd);
+                }
+                break;
+            case IDM_FILE_ONNX:         
+                if (select_file(hWnd, onnx_file, L"ONNX\0*.onnx\0All\0*.*\0"))
+                {
+                    PROC_STOP();
+                    //YoloAIParametors yp;
+                    //yp._onnx_file_name = onnx_file.c_str();
+                    if(pt_YoloObjectDetection!=nullptr)
+                        pt_YoloObjectDetection->YP.onnx_file_name = onnx_file;
+                    set_file_menu_items(hWnd);
+                    PROC_START(hWnd);
+                }
+                break;
+            case IDM_FILE_NAMES	: 
+                select_file(hWnd, names_file, L"NAMES\0*.names\0All\0*.*\0"); 
+                set_file_menu_items(hWnd);
+                break;
+            case IDM_FILE_ONNX8:
+                if (select_file(hWnd, onnx_file8, L"ONNX\0*.onnx\0All\0*.*\0"))
+                {
+                    PROC_STOP();
+                    //YoloAIParametors yp;
+                    //yp._onnx_file_name = onnx_file.c_str();
+                    if (pt_YoloObjectDetection != nullptr)
+                        pt_YoloObjectDetection->YP.onnx_file_name = onnx_file8;
+                    set_file_menu_items(hWnd);
+                    PROC_START(hWnd);
+                }
+                break;
+            case IDM_FILE_NAMES8:
+                select_file(hWnd, names_file8, L"NAMES\0*.names\0All\0*.*\0");
+                set_file_menu_items(hWnd);
+                break;
+            case IDM_FILE_POSEWEIGHT:
+                select_file(hWnd, poseweight, L"CAFFEMODEL\0*.caffemodel\0All\0*.*\0"); 
+                set_file_menu_items(hWnd);
+                break;
+            case IDM_FILE_POSEPROTO:    
+                select_file(hWnd, poseproto, L"PROTOTXT\0*.prototxt\0All\0*.*\0"); 
+                set_file_menu_items(hWnd);
                 break;
 
             case IDM_VIDEOREC_VGA:
-                //_VIDEO_REC = true;
-                _mvw_org.width = 720;
-                _mvw_org.height = 480;
-                _mvw_ai.width = 720;
-                _mvw_ai.height = 480;
-                _mvw_org.open(MP4VHA);
-                _mvw_ai.open(MP4VHAAI);
+                mvw_org.width = 720;
+                mvw_org.height = 480;
+                mvw_ai.width = 720;
+                mvw_ai.height = 480;
+                mvw_org.open(add_dt_ext(MP4PATH + MP4VHA, MP4EXT).c_str());
+                mvw_ai.open(add_dt_ext(MP4PATH + MP4VHAAI, MP4EXT).c_str());
+
                 break;
             case IDM_VIDEOREC_HD:
-                //_VIDEO_REC = true;
-                _mvw_org.width = 1920;
-                _mvw_org.height = 1080;
-                _mvw_ai.width = 1920;
-                _mvw_ai.height = 1080;
-                _mvw_org.open(MP4HD);
-                _mvw_ai.open(MP4HDAI);
+                mvw_org.width = 1920;
+                mvw_org.height = 1080;
+                mvw_ai.width = 1920;
+                mvw_ai.height = 1080;
+                mvw_org.open(add_dt_ext(MP4PATH + MP4HD, MP4EXT).c_str());
+                mvw_ai.open(add_dt_ext(MP4PATH + MP4HDAI, MP4EXT).c_str());
                 break;
             case IDM_VIDEOREC_END:
-                _mvw_org.release();
-                _mvw_ai.release();
+                mvw_org.release();
+                mvw_ai.release();
                 break;
 
-            case IDM_C_001:set_display_time_seconds(1); break;
-            case IDM_C_003:set_display_time_seconds(3); break;
-            case IDM_C_008:set_display_time_seconds(8); break;
-            case IDM_C_015:set_display_time_seconds(15); break;
-            case IDM_C_030:set_display_time_seconds(30); break;
-            case IDM_C_060:set_display_time_seconds(60); break;
-            case IDM_C_120:set_display_time_seconds(120); break;
-            case IDM_C_300:set_display_time_seconds(300); break;
-            case IDM_C_600:set_display_time_seconds(600); break;
+            case IDM_C_000:set_display_time_seconds(  0); DTSM(hWnd); break;
+            case IDM_C_001:set_display_time_seconds(  1); DTSM(hWnd); break;
+            case IDM_C_003:set_display_time_seconds(  3); DTSM(hWnd); break;
+            case IDM_C_008:set_display_time_seconds(  8); DTSM(hWnd); break;
+            case IDM_C_015:set_display_time_seconds( 15); DTSM(hWnd); break;
+            case IDM_C_030:set_display_time_seconds( 30); DTSM(hWnd); break;
+            case IDM_C_060:set_display_time_seconds( 60); DTSM(hWnd); break;
+            case IDM_C_120:set_display_time_seconds(120); DTSM(hWnd); break;
+            case IDM_C_300:set_display_time_seconds(300); DTSM(hWnd); break;
+            case IDM_C_600:set_display_time_seconds(600); DTSM(hWnd); break;
 
-            case IDM_F_0003:set_frame_between_time(3000); break;
-            case IDM_F_0005:set_frame_between_time(2000); break;
-            case IDM_F_0008:set_frame_between_time(1500); break;
-            case IDM_F_0010:set_frame_between_time(1000); break;
-            case IDM_F_0020:set_frame_between_time(500); break;
-            case IDM_F_0100:set_frame_between_time(100); break;
-            case IDM_F_0200:set_frame_between_time(50); break;
-            case IDM_F_0300:set_frame_between_time(33); break;
-            case IDM_F_0600:set_frame_between_time(16); break;
-            case IDM_F_1200:set_frame_between_time(8); break;
+            case IDM_F_0003:set_frame_between_time(3000); FBTM(hWnd); break;
+            case IDM_F_0005:set_frame_between_time(2000); FBTM(hWnd); break;
+            case IDM_F_0008:set_frame_between_time(1500); FBTM(hWnd); break;
+            case IDM_F_0010:set_frame_between_time(1000); FBTM(hWnd); break;
+            case IDM_F_0020:set_frame_between_time(500 ); FBTM(hWnd); break;
+            case IDM_F_0100:set_frame_between_time(100 ); FBTM(hWnd); break;
+            case IDM_F_0200:set_frame_between_time(50  ); FBTM(hWnd); break;
+            case IDM_F_0300:set_frame_between_time(33  ); FBTM(hWnd); break;
+            case IDM_F_0600:set_frame_between_time(16  ); FBTM(hWnd); break;
+            case IDM_F_1200:set_frame_between_time(8   ); FBTM(hWnd); break;
 
-            case IDM_AI_SCORE_THRESHOLD_000:set_score_threshold(0.001f, _pt_yod); break;
-            case IDM_AI_SCORE_THRESHOLD_010:set_score_threshold(0.1f, _pt_yod); break;
-            case IDM_AI_SCORE_THRESHOLD_020:set_score_threshold(0.2f, _pt_yod); break;
-            case IDM_AI_SCORE_THRESHOLD_030:set_score_threshold(0.3f, _pt_yod); break;
-            case IDM_AI_SCORE_THRESHOLD_040:set_score_threshold(0.4f, _pt_yod); break;
-            case IDM_AI_SCORE_THRESHOLD_050:set_score_threshold(0.5f, _pt_yod); break;
-            case IDM_AI_SCORE_THRESHOLD_060:set_score_threshold(0.6f, _pt_yod); break;
-            case IDM_AI_SCORE_THRESHOLD_070:set_score_threshold(0.7f, _pt_yod); break;
-            case IDM_AI_SCORE_THRESHOLD_080:set_score_threshold(0.8f, _pt_yod); break;
-            case IDM_AI_SCORE_THRESHOLD_090:set_score_threshold(0.9f, _pt_yod); break;
-            case IDM_AI_SCORE_THRESHOLD_100:set_score_threshold(1.0f, _pt_yod); break;
+            case IDM_AI_SCORE_THRESHOLD_000:set_score_threshold(0.001f, pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_010:set_score_threshold(0.1f  , pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_020:set_score_threshold(0.2f  , pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_030:set_score_threshold(0.3f  , pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_040:set_score_threshold(0.4f  , pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_050:set_score_threshold(0.5f  , pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_060:set_score_threshold(0.6f  , pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_070:set_score_threshold(0.7f  , pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_080:set_score_threshold(0.8f  , pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_090:set_score_threshold(0.9f  , pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_100:set_score_threshold(1.0f  , pt_YoloObjectDetection); STHM(hWnd); break;
 
-            case IDM_AI_NMS_THRESHOLD_000:set_nms_threshold(0.0f, _pt_yod); break;
-            case IDM_AI_NMS_THRESHOLD_010:set_nms_threshold(0.1f, _pt_yod); break;
-            case IDM_AI_NMS_THRESHOLD_020:set_nms_threshold(0.2f, _pt_yod); break;
-            case IDM_AI_NMS_THRESHOLD_030:set_nms_threshold(0.3f, _pt_yod); break;
-            case IDM_AI_NMS_THRESHOLD_040:set_nms_threshold(0.4f, _pt_yod); break;
-            case IDM_AI_NMS_THRESHOLD_050:set_nms_threshold(0.5f, _pt_yod); break;
-            case IDM_AI_NMS_THRESHOLD_060:set_nms_threshold(0.6f, _pt_yod); break;
-            case IDM_AI_NMS_THRESHOLD_070:set_nms_threshold(0.7f, _pt_yod); break;
-            case IDM_AI_NMS_THRESHOLD_080:set_nms_threshold(0.8f, _pt_yod); break;
-            case IDM_AI_NMS_THRESHOLD_090:set_nms_threshold(0.9f, _pt_yod); break;
-            case IDM_AI_NMS_THRESHOLD_100:set_nms_threshold(1.0f, _pt_yod); break;
+            case IDM_AI_NMS_THRESHOLD_000:set_nms_threshold(0.0f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_010:set_nms_threshold(0.1f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_020:set_nms_threshold(0.2f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_030:set_nms_threshold(0.3f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_040:set_nms_threshold(0.4f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_050:set_nms_threshold(0.5f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_060:set_nms_threshold(0.6f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_070:set_nms_threshold(0.7f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_080:set_nms_threshold(0.8f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_090:set_nms_threshold(0.9f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_100:set_nms_threshold(1.0f, pt_YoloObjectDetection); SNHM(hWnd); break;
 
-            case IDM_AI_CONF_THRESHOLD_000:set_conf_threshold(0.001f, _pt_yod); break;
-            case IDM_AI_CONF_THRESHOLD_010:set_conf_threshold(0.1f, _pt_yod); break;
-            case IDM_AI_CONF_THRESHOLD_020:set_conf_threshold(0.2f, _pt_yod); break;
-            case IDM_AI_CONF_THRESHOLD_030:set_conf_threshold(0.3f, _pt_yod); break;
-            case IDM_AI_CONF_THRESHOLD_040:set_conf_threshold(0.4f, _pt_yod); break;
-            case IDM_AI_CONF_THRESHOLD_050:set_conf_threshold(0.5f, _pt_yod); break;
-            case IDM_AI_CONF_THRESHOLD_060:set_conf_threshold(0.6f, _pt_yod); break;
-            case IDM_AI_CONF_THRESHOLD_070:set_conf_threshold(0.7f, _pt_yod); break;
-            case IDM_AI_CONF_THRESHOLD_080:set_conf_threshold(0.8f, _pt_yod); break;
-            case IDM_AI_CONF_THRESHOLD_090:set_conf_threshold(0.9f, _pt_yod); break;
-            case IDM_AI_CONF_THRESHOLD_100:set_conf_threshold(1.0f, _pt_yod); break;
+            case IDM_AI_CONF_THRESHOLD_000:set_conf_threshold(0.001f, pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_010:set_conf_threshold(0.1f  , pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_020:set_conf_threshold(0.2f  , pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_030:set_conf_threshold(0.3f  , pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_040:set_conf_threshold(0.4f  , pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_050:set_conf_threshold(0.5f  , pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_060:set_conf_threshold(0.6f  , pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_070:set_conf_threshold(0.7f  , pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_080:set_conf_threshold(0.8f  , pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_090:set_conf_threshold(0.9f  , pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_100:set_conf_threshold(1.0f  , pt_YoloObjectDetection); SCHM(hWnd); break;
 
+            case IDM_CAM_001: view_single_cam(hWnd, 1); break;
+            case IDM_CAM_002: view_single_cam(hWnd, 2); break;
+            case IDM_CAM_003: view_single_cam(hWnd, 3); break;
+            case IDM_CAM_004: view_single_cam(hWnd, 4); break;
+            case IDM_CAM_005: view_single_cam(hWnd, 5); break;
+            case IDM_CAM_006: view_single_cam(hWnd, 6); break;
+            case IDM_CAM_007: view_single_cam(hWnd, 7); break;
+            case IDM_CAM_008: view_single_cam(hWnd, 8); break;
+            case IDM_CAM_009: view_single_cam(hWnd, 9); break;
+            case IDM_CAM_010: view_single_cam(hWnd, 10); break;
+            case IDM_CAM_011: view_single_cam(hWnd, 11); break;
+            case IDM_CAM_012: view_single_cam(hWnd, 12); break;
+            case IDM_CAM_013: view_single_cam(hWnd, 13); break;
+            case IDM_CAM_014: view_single_cam(hWnd, 14); break;
+            case IDM_CAM_015: view_single_cam(hWnd, 15); break;
+            case IDM_CAM_016: view_single_cam(hWnd, 16); break;
+            case IDM_CAM_017: view_single_cam(hWnd, 17); break;
+            case IDM_CAM_018: view_single_cam(hWnd, 18); break;
+            case IDM_CAM_019: view_single_cam(hWnd, 19); break;
+            case IDM_CAM_020: view_single_cam(hWnd, 20); break;
+            case IDM_CAM_021: view_single_cam(hWnd, 21); break;
+            case IDM_CAM_022: view_single_cam(hWnd, 22); break;
+            case IDM_CAM_023: view_single_cam(hWnd, 23); break;
+            case IDM_CAM_024: view_single_cam(hWnd, 24); break;
+            case IDM_CAM_025: view_single_cam(hWnd, 25); break;
+            case IDM_CAM_026: view_single_cam(hWnd, 26); break;
+            case IDM_CAM_027: view_single_cam(hWnd, 27); break;
+            case IDM_CAM_028: view_single_cam(hWnd, 28); break;
+            case IDM_CAM_029: view_single_cam(hWnd, 29); break;
+            case IDM_CAM_030: view_single_cam(hWnd, 30); break;
+            case IDM_CAM_031: view_single_cam(hWnd, 31); break;
+            case IDM_CAM_032: view_single_cam(hWnd, 32); break;
+            case IDM_CAM_033: view_single_cam(hWnd, 33); break;
+            case IDM_CAM_034: view_single_cam(hWnd, 34); break;
+            case IDM_CAM_035: view_single_cam(hWnd, 35); break;
+            case IDM_CAM_036: view_single_cam(hWnd, 36); break;
+            case IDM_CAM_037: view_single_cam(hWnd, 37); break;
+            case IDM_CAM_038: view_single_cam(hWnd, 38); break;
+            case IDM_CAM_039: view_single_cam(hWnd, 39); break;
+            case IDM_CAM_040: view_single_cam(hWnd, 40); break;
+            case IDM_CAM_041: view_single_cam(hWnd, 41); break;
+            case IDM_CAM_042: view_single_cam(hWnd, 42); break;
+            case IDM_CAM_043: view_single_cam(hWnd, 43); break;
+            case IDM_CAM_044: view_single_cam(hWnd, 44); break;
+            case IDM_CAM_045: view_single_cam(hWnd, 45); break;
+            case IDM_CAM_046: view_single_cam(hWnd, 46); break;
+            case IDM_CAM_047: view_single_cam(hWnd, 47); break;
+            case IDM_CAM_048: view_single_cam(hWnd, 48); break;
+            case IDM_CAM_049: view_single_cam(hWnd, 49); break;
+            case IDM_CAM_050: view_single_cam(hWnd, 50); break;
+            case IDM_CAM_051: view_single_cam(hWnd, 51); break;
+            case IDM_CAM_052: view_single_cam(hWnd, 52); break;
+            case IDM_CAM_053: view_single_cam(hWnd, 53); break;
+            case IDM_CAM_054: view_single_cam(hWnd, 54); break;
+            case IDM_CAM_055: view_single_cam(hWnd, 55); break;
+            case IDM_CAM_056: view_single_cam(hWnd, 56); break;
+            case IDM_CAM_057: view_single_cam(hWnd, 57); break;
+            case IDM_CAM_058: view_single_cam(hWnd, 58); break;
+            case IDM_CAM_059: view_single_cam(hWnd, 59); break;
+            case IDM_CAM_060: view_single_cam(hWnd, 60); break;
+            case IDM_CAM_061: view_single_cam(hWnd, 61); break;
+            case IDM_CAM_062: view_single_cam(hWnd, 62); break;
+            case IDM_CAM_063: view_single_cam(hWnd, 63); break;
+            case IDM_CAM_064: view_single_cam(hWnd, 64); break;
+            case IDM_CAM_065: view_single_cam(hWnd, 65); break;
+            case IDM_CAM_066: view_single_cam(hWnd, 66); break;
+            case IDM_CAM_067: view_single_cam(hWnd, 67); break;
+            case IDM_CAM_068: view_single_cam(hWnd, 68); break;
+            case IDM_CAM_069: view_single_cam(hWnd, 69); break;
+            case IDM_CAM_070: view_single_cam(hWnd, 70); break;
+            case IDM_CAM_071: view_single_cam(hWnd, 71); break;
+            case IDM_CAM_072: view_single_cam(hWnd, 72); break;
+            case IDM_CAM_073: view_single_cam(hWnd, 73); break;
+            case IDM_CAM_074: view_single_cam(hWnd, 74); break;
+            case IDM_CAM_075: view_single_cam(hWnd, 75); break;
+            case IDM_CAM_076: view_single_cam(hWnd, 76); break;
+            case IDM_CAM_077: view_single_cam(hWnd, 77); break;
+            case IDM_CAM_078: view_single_cam(hWnd, 78); break;
+            case IDM_CAM_079: view_single_cam(hWnd, 79); break;
+            case IDM_CAM_080: view_single_cam(hWnd, 80); break;
+            case IDM_CAM_081: view_single_cam(hWnd, 81); break;
+            case IDM_CAM_082: view_single_cam(hWnd, 82); break;
+            case IDM_CAM_083: view_single_cam(hWnd, 83); break;
+            case IDM_CAM_084: view_single_cam(hWnd, 84); break;
+            case IDM_CAM_085: view_single_cam(hWnd, 85); break;
+            case IDM_CAM_086: view_single_cam(hWnd, 86); break;
+            case IDM_CAM_087: view_single_cam(hWnd, 87); break;
+            case IDM_CAM_088: view_single_cam(hWnd, 88); break;
+            case IDM_CAM_089: view_single_cam(hWnd, 89); break;
+            case IDM_CAM_090: view_single_cam(hWnd, 90); break;
+            case IDM_CAM_091: view_single_cam(hWnd, 91); break;
+            case IDM_CAM_092: view_single_cam(hWnd, 92); break;
+            case IDM_CAM_093: view_single_cam(hWnd, 93); break;
+            case IDM_CAM_094: view_single_cam(hWnd, 94); break;
+            case IDM_CAM_095: view_single_cam(hWnd, 95); break;
+            case IDM_CAM_096: view_single_cam(hWnd, 96); break;
+            case IDM_CAM_097: view_single_cam(hWnd, 97); break;
+            case IDM_CAM_098: view_single_cam(hWnd, 98); break;
+            case IDM_CAM_099: view_single_cam(hWnd, 99); break;
+            case IDM_CAM_100: view_single_cam(hWnd, 100); break;
+
+                
+                //テキストを表示
             case IDM_TEXTOUTPUT:
             {
-                if (_ai_text_output)
-                    _ai_text_output = false;
+                if (ai_text_output)
+                    ai_text_output = false;
                 else
-                    _ai_text_output = true;
+                {
+                    ai_text_output = true;
+/*
+                    hEdit = CreateWindowEx(
+                        WS_EX_CLIENTEDGE,
+                        L"EDIT",
+                        L"",
+                        WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL,
+                        10, 10, 500, 300,
+                        hWnd,
+                        (HMENU)IDC_TEXTWINDOW,
+                        GetModuleHandle(NULL),
+                        NULL);
+
+                        // エディットコントロールのテキストと背景色を設定
+                        //HDC _hdc = GetDC(hEdit);
+                        //SetTextColor((HDC)_hdc, RGB(255, 255, 255)); // テキスト色を白に
+                        //SetBkColor((HDC)_hdc, RGB(0, 0, 0));         // 背景色を黒に
+                        //ReleaseDC(hEdit, _hdc);
+                        //SetTextColor((HDC)wParam, RGB(255, 255, 255)); // テキスト色を白に
+                        //SetBkColor((HDC)wParam, RGB(0, 0, 0));         // 背景色を黒に
+
+                        //UpdateWindow(hEdit);
+
+                        //SendMessage(hEdit, WM_SETFONT, (WPARAM)hFnt, MAKELPARAM(FALSE, 0));
+                        //SendMessage(hEdit, WM_SE, (WPARAM)hFnt, MAKELPARAM(FALSE, 0));
+                        ShowWindow(hWnd, SW_SHOW);
+                        UpdateWindow(hWnd);
+
+                    if (hEdit == NULL) {
+                        MessageBox(hWnd, L"Could not create edit box.", L"Error", MB_OK | MB_ICONERROR);
+                    }
+                    else {
+                        // テキストボックスにテキストを設定
+                        std::string text = "0123456789abcdefghijklmnopqrstuvwxyz\n";
+                        std::string repeatedText;
+                        for (int i = 0; i < 10; ++i) {
+                            repeatedText += text;
+                        }
+                        SetWindowText(hEdit, _A2CW(repeatedText.c_str()));
+                    }
+  */
+                }
             }
             break;
+            case WM_CTLCOLOREDIT:
+                SetBkColor((HDC)wParam, RGB(0, 0, 0));
+                return (INT_PTR)hbrBlackBrush;
                 
             case IDM_MULTIMONITOR_1:
                 set_fullscreen(hWnd, 0);
@@ -557,29 +1549,66 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             case IDM_MULTIMONITOR_4:
                 set_fullscreen(hWnd, 3);
                 break;
+            case IDM_MULTIMONITOR_1M:
+                ToggleFullscreenWithMenu(hWnd);
+                isFullscreen = true;
+                break;
             default:
                 return DefWindowProc(hWnd, message, wParam, lParam);
             }
             break;
         }
         break;
+    //////////////////////////////////////////////////////////////////
+    //WM_CREATE
     case WM_CREATE:
     {
+        //winmainの最初の方に移動
+        if(0)
+            read_write_file(INIFILE, RWFILE_READ);
+        //カメラリストを読み込む       
         cam_urls = readRecordsFromFile(url_file);
-        _pt_yod = new YoloObjectDetection;
-        YoloAIParametors yp;
-        yp._onnx_file_name = onnx_file.c_str();
-        yp._names_file_name = names_file.c_str();
-        yp._input_width = DEFAULT_AI_INPUT_WIDTH;
-        yp._input_height = DEFAULT_AI_INPUT_HEIGHT;
-        yp._score_threshold = _SCORE_THRESHOLD;
-        yp._nms_threshold = _NMS_THRESHOLD;
-        yp._confidence_thresgold = _CONFIDENCE_THRESHOLD;
 
-        _ai_running = _pt_yod->init_yolov5(
-            yp,
-            true, false);
+        set_camera_menu(hWnd, cam_urls);
+
+        ///////////////////////////////////////////////////////////////////////
+        //poseweight, poseprotoの両方に値が入っていれば DRAWCYCLE_POSENETをON
+        if (DrawCycleMode == DRAWCYCLE_POSENET)
+        {
+            if (poseweight != "" && poseproto != "")
+            {
+                load_PoseNet(AI_LOAD);
+            }
+            else
+                DrawCycleMode = DRAWCYCLE_STREAM;
         }
+        else if (DrawCycleMode == DRAWCYCLE_YOLO5)
+        {
+            load_YoloObjectDetection(AI_LOAD);
+        }
+        else if (DrawCycleMode == DRAWCYCLE_YOLO8)
+        {
+            load_YoloObjectDetection(AI_LOAD);
+        }
+        else
+            /*STREAM*/;
+
+        ///////////////////////////////////////////////////////////////////////
+        //メニュー表示を更新
+        set_file_menu_items(hWnd);
+        set_display_time_seconds_menuitems(hWnd);
+        set_frame_between_time_menuitems(hWnd);
+        ///////////////////////////////////////////////////////////////////////
+        //メニュー表示を更新 ptYoloのインスタンスが無いと更新されないのでここ
+        STHM(hWnd);
+        SNHM(hWnd);
+        SCHM(hWnd);
+
+        if(WINDOW_MAX)
+            ShowWindow(hWnd, SW_MAXIMIZE); // ウィンドウを最大化
+        // ブラシの作成（背景色を黒に設定）
+        hbrBlackBrush = CreateSolidBrush(RGB(0, 0, 0));
+    }
     break;
     //ダブルクリック 全画面<=>ウィンドウ
     case WM_LBUTTONDBLCLK:
@@ -590,12 +1619,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             //isFullscreen = !isFullscreen;
             set_cvw_stop(false);
             // ウィンドウを元のサイズと位置に戻す
-            SetWindowLong(hWnd, GWL_STYLE, WS_OVERLAPPEDWINDOW);
-            SetWindowPos(hWnd, HWND_TOP, windowRect.left, windowRect.top, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top, SWP_FRAMECHANGED);
-            SetMenu(hWnd, hMenu);
-            ShowWindow(hWnd, SW_SHOW);
+            ResumeWindow(hWnd);
 
-            InvalidateRect(hWnd, NULL, TRUE);
+            //SetWindowLong(hWnd, GWL_STYLE, WS_OVERLAPPEDWINDOW);
+            //SetWindowPos(hWnd, HWND_TOP, windowRect.left, windowRect.top, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top, SWP_FRAMECHANGED);
+            //SetMenu(hWnd, hMenu_for_fullscreen);
+            //ShowWindow(hWnd, SW_SHOW);
+            //InvalidateRect(hWnd, NULL, TRUE);
         }
         else
         {
@@ -606,6 +1636,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 AppendMenu(hPopupMenu, MF_STRING, IDM_MULTIMONITOR_2, TEXT("モニター 2"));
                 AppendMenu(hPopupMenu, MF_STRING, IDM_MULTIMONITOR_3, TEXT("モニター 3"));
                 AppendMenu(hPopupMenu, MF_STRING, IDM_MULTIMONITOR_4, TEXT("モニター 4"));
+                AppendMenu(hPopupMenu, MF_STRING, IDM_MULTIMONITOR_1M, TEXT("メニューバーを残して最大化"));
+
                 // クリック位置を取得
                 POINT pt;
                 pt.x = LOWORD(lParam);
@@ -624,7 +1656,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (wParam == VK_SPACE)
         {
             //MessageBox(hWnd, L"スペースキーが押されました", L"キーイベント", MB_OK);
-            _next_source = true;
+            Next_source = true;
         }
         break;
             
@@ -642,7 +1674,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
         DefWindowProc(hWnd, message, wParam, lParam);
         break;
-
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //WM_PAINT
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     case WM_PAINT:
     {
         //描画中 処理が重複・輻輳しないよう、はじく
@@ -653,15 +1687,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         //画面サイズ変更をしている時の処理
         else if (bSuppressPaint)
         {
-            if(0)
-                if (_main_th != nullptr)
-                {
-                    set_cvw_stop(true);
-                    svw_wait_stop();
-                    _main_th->join();
-                    delete _main_th;
-                    _main_th = nullptr;
-                }
+            if (0)
+                PROC_STOP();
         }
         else
         {   
@@ -669,53 +1696,160 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             //とりあえず黒く塗る
             PAINTSTRUCT ps;
             HDC hDC = BeginPaint(hWnd, &ps);
-            AllPaintBlack(hWnd, hDC);
+            AllPaintBlack(hWnd, hDC, DrawArea(1,1,0,0));
             EndPaint(hWnd, &ps);
 
             //IPカメラ
-            if (appmode==APPMODE_NETCAM)
+            if (appmode == APPMODE_NETCAM)
             {
-                //描画スレッドがあった場合はクリア
-                //if(0)
-                //if (_main_th != nullptr)
-                //{
-                //    set_cvw_stop(true);
-                //    svw_wait_stop();
-                //    _main_th->join();
-                //    delete _main_th;
-                //    _main_th = nullptr;
-                //}
-
-                //描画スレッドがない場合は立ち上げ
-                if (_main_th == nullptr)
+                //HDC hDC = ::GetDC(hWnd);
+                if (ViewMode == IDM_VIEW_1)
                 {
-                    set_cvw_stop(false);
-                    _main_th = new std::thread(&DrawCV2Window, hWnd, _pt_yod, cam_urls, 0, pAICSV);
+                    //PROC_FIX_CAM(-1);
+                    PROC_CYCLE(true);
+                    //描画スレッドがない場合は立ち上げ
+                    if (main_th[0] == nullptr)
+                    {
+                        set_cvw_stop(false);
+                        main_th[0] = new std::thread(
+                            &DrawCV2Window,
+                            DrawCycleMode,
+                            hWnd,
+                            hDC,
+                            DrawArea(1,1,0,0),
+                            true,
+                            pt_YoloObjectDetection,
+                            _ptg_posenet,
+                            cam_urls,
+                            pAICSV
+                        );
+                    }
+                }
+                //画面分割の処理 分割した画面ごとにスレッドを起動する。
+                else if(ViewMode == IDM_VIEW_4)//Mode4View==true
+                {
+                    //std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoFour(cam_urls);
+                    std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls,4);
+                    if (main_th[0] == nullptr) main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 0, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[0], pAICSV);
+                    if (main_th[1] == nullptr) main_th[1] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 1, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[1], pAICSV);
+                    if (main_th[2] == nullptr) main_th[2] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 0, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[2], pAICSV);
+                    if (main_th[3] == nullptr) main_th[3] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 1, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[3], pAICSV);
+                }
+                else if (ViewMode == IDM_VIEW_6)//Mode4View==true
+                {
+                    std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls, 6);
+                    if (main_th[0] == nullptr) main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 0, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[0], pAICSV);
+                    if (main_th[1] == nullptr) main_th[1] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 0, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[1], pAICSV);
+                    if (main_th[2] == nullptr) main_th[2] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 1, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[2], pAICSV);
+                    if (main_th[3] == nullptr) main_th[3] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 1, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[3], pAICSV);
+                    if (main_th[4] == nullptr) main_th[4] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 2, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[4], pAICSV);
+                    if (main_th[5] == nullptr) main_th[5] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 2, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[5], pAICSV);
+                }
+                else if (ViewMode == IDM_VIEW_9)//Mode4View==true
+                {
+                    std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls, 9);
+                    if (main_th[0] == nullptr) main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 0, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[0], pAICSV);
+                    if (main_th[1] == nullptr) main_th[1] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 1, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[1], pAICSV);
+                    if (main_th[2] == nullptr) main_th[2] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 2, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[2], pAICSV);
+                    if (main_th[3] == nullptr) main_th[3] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 0, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[3], pAICSV);
+                    if (main_th[4] == nullptr) main_th[4] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 1, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[4], pAICSV);
+                    if (main_th[5] == nullptr) main_th[5] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 2, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[5], pAICSV);
+                    if (main_th[6] == nullptr) main_th[6] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 0, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[6], pAICSV);
+                    if (main_th[7] == nullptr) main_th[7] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 1, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[7], pAICSV);
+                    if (main_th[8] == nullptr) main_th[8] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 2, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[8], pAICSV);
+                }
+                else if (ViewMode == IDM_VIEW_12)//Mode4View==true
+                {
+                    std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls, 12);
+                    if (main_th[0] == nullptr)  main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 0, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[0], pAICSV);
+                    if (main_th[1] == nullptr)  main_th[1]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 0, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[1], pAICSV);
+                    if (main_th[2] == nullptr)  main_th[2]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 0, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[2], pAICSV);
+                    if (main_th[3] == nullptr)  main_th[3]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 1, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[3], pAICSV);
+                    if (main_th[4] == nullptr)  main_th[4]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 1, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[4], pAICSV);
+                    if (main_th[5] == nullptr)  main_th[5]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 1, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[5], pAICSV);
+                    if (main_th[6] == nullptr)  main_th[6]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 2, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[6], pAICSV);
+                    if (main_th[7] == nullptr)  main_th[7]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 2, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[7], pAICSV);
+                    if (main_th[8] == nullptr)  main_th[8]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 2, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[8], pAICSV);
+                    if (main_th[9] == nullptr)  main_th[9]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 3, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[9], pAICSV);
+                    if (main_th[10] == nullptr) main_th[10] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 3, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[10], pAICSV);
+                    if (main_th[11] == nullptr) main_th[11] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 3, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[11], pAICSV);
+                }
+                else if (ViewMode == IDM_VIEW_16)//Mode4View==true
+                {
+                    std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls, 16);
+                    if (main_th[0]  == nullptr) main_th[0] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[0],  pAICSV);
+                    if (main_th[1]  == nullptr) main_th[1] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[1],  pAICSV);
+                    if (main_th[2]  == nullptr) main_th[2] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[2],  pAICSV);
+                    if (main_th[3]  == nullptr) main_th[3] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[3],  pAICSV);
+                    if (main_th[4]  == nullptr) main_th[4] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[4],  pAICSV);
+                    if (main_th[5]  == nullptr) main_th[5] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[5],  pAICSV);
+                    if (main_th[6]  == nullptr) main_th[6] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[6],  pAICSV);
+                    if (main_th[7]  == nullptr) main_th[7] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[7],  pAICSV);
+                    if (main_th[8]  == nullptr) main_th[8] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[8],  pAICSV);
+                    if (main_th[9]  == nullptr) main_th[9] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[9],  pAICSV);
+                    if (main_th[10] == nullptr) main_th[10] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[10], pAICSV);
+                    if (main_th[11] == nullptr) main_th[11] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[11], pAICSV);
+                    if (main_th[12] == nullptr) main_th[12] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 3), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[12], pAICSV);
+                    if (main_th[13] == nullptr) main_th[13] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 3), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[13], pAICSV);
+                    if (main_th[14] == nullptr) main_th[14] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 3), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[14], pAICSV);
+                    if (main_th[15] == nullptr) main_th[15] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 3), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[15], pAICSV);
+                }
+                //ここからはforルーチンで
+                else if (ViewMode == IDM_VIEW_36)//Mode4View==true
+                {
+                    std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls, 36);
+                    int k = 0;
+                    for (int i=0; i < 6; i++)
+                        for (int j=0; j < 6; j++)
+                        {
+                            if (main_th[k] == nullptr)
+                                main_th[k] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(6, 6, i, j), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[k], pAICSV);
+                            k++;
+                        }
+                }
+                else if (ViewMode == IDM_VIEW_64)//Mode4View==true
+                {
+                    std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls, 64);
+                    int k = 0;
+                    for (int i=0; i < 8; i++)
+                        for (int j=0; j < 8; j++)
+                        {
+                            if (main_th[k] == nullptr)
+                                main_th[k] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(8, 8, i, j), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[k], pAICSV);
+                            k++;
+                        }
                 }
             }
             if (appmode == APPMODE_MOVFILE)
             {
-                if (!cvw_file_processing && !cvw_file_end)
+                //多重起動を避ける
+                //if (!cvw_file_processing && cvw_file_end)
+                if (!cvw_file_processing)
                 {
                     //falseにするのはDrawCV2Windowfの中
                     cvw_file_processing = true;
                     //描画スレッドがあった場合はクリア
-                    if (_main_th != nullptr)
-                    {
-                        set_cvw_stop(true);
-                        svw_wait_stop();
-                        _main_th->join();
-                        delete _main_th;
-                        _main_th = nullptr;
-                    }
+                    PROC_STOP();
+                   
                     //描画スレッドがない場合は立ち上げ
-                    if (_main_th == nullptr)
+                    if (main_th[0] == nullptr)
                     {
                         set_cvw_stop(false);
-                        _main_th = new std::thread(&DrawCV2Windowf, hWnd, _pt_yod, _video_file_path, 0, pAICSV);
+                        main_th[0] = new std::thread(&DrawCV2Windowf,
+                            DrawCycleMode,
+                            hWnd,
+                            hDC,
+                            DrawArea(1, 1, 0, 0),
+                            true,
+                            pt_YoloObjectDetection,
+                            _ptg_posenet,
+                            video_file_path,
+                            pAICSV);
                     }
                 }
             }
+            //EndPaint(hWnd, &ps);
+            //ReleaseDC(hWnd, hDC);
             wm_paint_now = false;
         }
         //↓これ要る? 要らないようなので外す 11/18
@@ -724,17 +1858,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     }
     case WM_DESTROY:
         //スレッドを停止
-        set_cvw_stop(true);
-        if(_main_th != nullptr)
-            _main_th->join();
-
+        PROC_STOP();
         PostQuitMessage(0);
+        
+        //AIをアンロード 関数の中で判断
+        load_YoloObjectDetection(AI_UNLOAD);
+        load_PoseNet(AI_UNLOAD);
 
-        if (_pt_yod != nullptr)
-        {
-            delete _pt_yod;
-            _pt_yod = nullptr;
-        }
+        read_write_file(INIFILE, RWFILE_WRITE);
+        //↓テスト
+        read_write_file(INIFILE, RWFILE_READ);
+
         break;
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);

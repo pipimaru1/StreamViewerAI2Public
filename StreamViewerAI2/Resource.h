@@ -16,16 +16,40 @@
 #define IDM_VIDEOREC_VGA		200
 #define IDM_VIDEOREC_HD			201
 #define IDM_VIDEOREC_END		202
+#define IDM_STREAM_START		203
+#define IDM_STREAM_STOP			204
+#define IDM_FILE_CAMS			209
+#define IDM_FILE_ONNX			205
+#define IDM_FILE_NAMES			206
+#define IDM_FILE_ONNX8			222
+#define IDM_FILE_NAMES8			223
+#define IDM_FILE_POSEWEIGHT		207
+#define IDM_FILE_POSEPROTO		208
+
+#define IDM_MODE_STREAM			210
+#define IDM_MODE_YOLO			211
+#define IDM_MODE_YOLO8			221
+#define IDM_MODE_POSE			212
+
+#define IDM_VIEW_1				213
+#define IDM_VIEW_4				214
+#define IDM_VIEW_6				215
+#define IDM_VIEW_9				216
+#define IDM_VIEW_12				217
+#define IDM_VIEW_16				218
+#define IDM_VIEW_36				219
+#define IDM_VIEW_64				220
 
 #define IDI_STREAMVIERWER		107
 #define IDI_SMALL				108
 #define IDC_STREAMVIERWER		109
 #define IDC_MYICON				2
+#define IDC_TEXTWINDOW			3
 
 //#define IDM_ABOUT				104
 //#define IDM_EXIT				105
 
-
+#define	IDM_C_000				110
 #define	IDM_C_001				119
 #define	IDM_C_003				111
 #define IDM_C_008				112
@@ -55,6 +79,7 @@
 #define IDM_MULTIMONITOR_6 136
 #define IDM_MULTIMONITOR_7 137
 #define IDM_MULTIMONITOR_8 138
+#define IDM_MULTIMONITOR_1M 139
 
 #define IDM_AI_SCORE_THRESHOLD_000 140
 #define IDM_AI_SCORE_THRESHOLD_010 141
@@ -91,6 +116,129 @@
 #define IDM_AI_CONF_THRESHOLD_080 188
 #define IDM_AI_CONF_THRESHOLD_090 189
 #define IDM_AI_CONF_THRESHOLD_100 190
+
+#define IDM_CAM_POP_1			1101
+#define IDM_CAM_POP_2			1102
+#define IDM_CAM_POP_3			1103
+#define IDM_CAM_POP_4			1104
+#define IDM_CAM_POP_5			1105
+#define IDM_CAM_POP_6			1106
+#define IDM_CAM_POP_7			1107
+#define IDM_CAM_POP_8			1108
+#define IDM_CAM_POP_9			1109
+
+#define IDM_CAM_001				1001
+#define IDM_CAM_002				1002
+#define IDM_CAM_003				1003
+#define IDM_CAM_004				1004
+#define IDM_CAM_005				1005
+#define IDM_CAM_006				1006
+#define IDM_CAM_007				1007
+#define IDM_CAM_008				1008
+#define IDM_CAM_009				1009
+
+#define IDM_CAM_010				1010
+#define IDM_CAM_011				1011
+#define IDM_CAM_012				1012
+#define IDM_CAM_013				1013
+#define IDM_CAM_014				1014
+#define IDM_CAM_015				1015
+#define IDM_CAM_016				1016
+#define IDM_CAM_017				1017
+#define IDM_CAM_018				1018
+#define IDM_CAM_019				1019
+
+#define IDM_CAM_020				1020
+#define IDM_CAM_021				1021
+#define IDM_CAM_022				1022
+#define IDM_CAM_023				1023
+#define IDM_CAM_024				1024
+#define IDM_CAM_025				1025
+#define IDM_CAM_026				1026
+#define IDM_CAM_027				1027
+#define IDM_CAM_028				1028
+#define IDM_CAM_029				1029
+
+#define IDM_CAM_030				1030
+#define IDM_CAM_031				1031
+#define IDM_CAM_032				1032
+#define IDM_CAM_033				1033
+#define IDM_CAM_034				1034
+#define IDM_CAM_035				1035
+#define IDM_CAM_036				1036
+#define IDM_CAM_037				1037
+#define IDM_CAM_038				1038
+#define IDM_CAM_039				1039
+
+#define IDM_CAM_040				1040
+#define IDM_CAM_041				1041
+#define IDM_CAM_042				1042
+#define IDM_CAM_043				1043
+#define IDM_CAM_044				1044
+#define IDM_CAM_045				1045
+#define IDM_CAM_046				1046
+#define IDM_CAM_047				1047
+#define IDM_CAM_048				1048
+#define IDM_CAM_049				1049
+
+#define IDM_CAM_050				1050
+#define IDM_CAM_051				1051
+#define IDM_CAM_052				1052
+#define IDM_CAM_053				1053
+#define IDM_CAM_054				1054
+#define IDM_CAM_055				1055
+#define IDM_CAM_056				1056
+#define IDM_CAM_057				1057
+#define IDM_CAM_058				1058
+#define IDM_CAM_059				1059
+
+#define IDM_CAM_060				1060
+#define IDM_CAM_061				1061
+#define IDM_CAM_062				1062
+#define IDM_CAM_063				1063
+#define IDM_CAM_064				1064
+#define IDM_CAM_065				1065
+#define IDM_CAM_066				1066
+#define IDM_CAM_067				1067
+#define IDM_CAM_068				1068
+#define IDM_CAM_069				1069
+
+#define IDM_CAM_070				1070
+#define IDM_CAM_071				1071
+#define IDM_CAM_072				1072
+#define IDM_CAM_073				1073
+#define IDM_CAM_074				1074
+#define IDM_CAM_075				1075
+#define IDM_CAM_076				1076
+#define IDM_CAM_077				1077
+#define IDM_CAM_078				1078
+#define IDM_CAM_079				1079
+
+#define IDM_CAM_080				1080
+#define IDM_CAM_081				1081
+#define IDM_CAM_082				1082
+#define IDM_CAM_083				1083
+#define IDM_CAM_084				1084
+#define IDM_CAM_085				1085
+#define IDM_CAM_086				1086
+#define IDM_CAM_087				1087
+#define IDM_CAM_088				1088
+#define IDM_CAM_089				1089
+
+#define IDM_CAM_090				1090
+#define IDM_CAM_091				1091
+#define IDM_CAM_092				1092
+#define IDM_CAM_093				1093
+#define IDM_CAM_094				1094
+#define IDM_CAM_095				1095
+#define IDM_CAM_096				1096
+#define IDM_CAM_097				1097
+#define IDM_CAM_098				1098
+#define IDM_CAM_099				1099
+
+#define IDM_CAM_100				1100
+
+
 
 
 #ifndef IDC_STATIC
