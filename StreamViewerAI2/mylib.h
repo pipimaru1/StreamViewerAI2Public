@@ -2,13 +2,12 @@
 
 #include <atltypes.h>
 #include <opencv2\opencv.hpp>
-
 #include <stdlib.h>
 #include <iostream>
 #include <fstream>
 #include <string>
 
-class my_video_writer
+class MyVideoWriter
 {
 	int fourcc;// = cv::VideoWriter::fourcc('M', 'P', '4', 'V');
 	double fps;// = 20; //動画からfpsを取得
@@ -18,9 +17,9 @@ class my_video_writer
 public:
 	cv::VideoWriter output;
 
-	my_video_writer();
-	//my_video_writer(std::string _fname);
-	my_video_writer(const char* _fname);
+	MyVideoWriter();
+	//MyVideoWriter(std::string _fname);
+	MyVideoWriter(const char* _fname);
 
 	int write(cv::Mat& frame);
 	int open(const char* _fname);
@@ -67,8 +66,10 @@ RECT RectSplit(RECT base, DrawArea _drawarea);
 
 #define GETDTSTR_NORMAL 0
 #define GETDTSTR_FMT1 1
-//extern volatile PoseNet* _ptg_posenet;
+//extern volatile PoseNet* ptPOSENET;
 //YYYYMMDDhhmmssを返す
+long GetCurrentDateLong();
+std::string GetCurrentDateString(int _mode = 0);
 std::string GetCurrentDateTimeString(int _mode = 0);
 std::string add_dt_ext(std::string _base_str, std::string _ext);
 
@@ -79,8 +80,15 @@ int  time_stump(cv::Mat& _image, float stump_size);
 
 void DoEvents(int n = 1);
 
-std::wstring stringToWstring(const std::string& s);
-std::string wstring2string(std::wstring oWString);
+std::wstring string2wstring(const std::string& s);
+std::string wstring2string(const std::wstring& oWString);
+#define S2W(s) string2wstring(s)
+#define W2S(w) wstring2string(w)
+
+// URLからIPアドレスを抽出する関数
+std::string getIPAddress(const std::string& url);
+// フルパスからファイル名を抽出する関数
+std::string getFileName(const std::string& fullPath);
 
 int MyDrawText(HWND hWnd, HDC hDC, std::string& _text, int x0 = 0, int y0 = 0, bool _add = false);
 
@@ -91,14 +99,14 @@ bool getLatestFrame(cv::VideoCapture& cap, cv::Mat& frame);
 //int DrawPicToHDC(cv::Mat cvImg, HWND hWnd, HDC hDC, bool bMaintainAspectRatio, int spl_w, int spl_h, int num_w, int num_h); //bMaintainAspectRatio=true
 int DrawPicToHDC(cv::Mat cvImg, HWND hWnd, HDC hDC, bool bMaintainAspectRatio, DrawArea drawing_position, bool _gray = false); //bMaintainAspectRatio=true
 
-extern std::mutex Mutex_DrawCycle_Draw;
+extern std::mutex MUTEX_DRAWCYCLE_DRAWING;
 
 void ToggleFullscreenWithMenu(HWND hwnd);
 void ResumeWindow(HWND hWnd);
 
-extern HMENU hMenu_for_fullscreen;
-extern RECT windowRect;
-extern bool isFullscreen;
+extern HMENU hMENU_FOR_FULLSCRENN;
+extern RECT mlWINDOWRECT;
+extern bool isFULLSCREEN;
 
 BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData);
 int set_fullscreen(HWND hWnd, int monitor);
@@ -112,3 +120,5 @@ int catchConnect(cv::VideoCapture* _pt_capture, std::atomic<bool>& _connected, s
 std::wstring _A2CW(const std::string& ascii);
 
 std::vector<std::vector<std::string>> readRecordsFromFile(const std::string& filename);
+
+void saveImageDataToFile(const std::vector<uchar>& data, const std::string& filename);

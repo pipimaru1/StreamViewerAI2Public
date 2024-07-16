@@ -3,20 +3,21 @@
 #include "resource.h"
 
 //↓まだ使っていない構造体(2024/2/15)
+//引数か複雑化したため、構造体化を検討中
 //クラス化した方がいいか悩み中
 struct DrawCVWindowParam
 {
-	int _DrawCycleMode;
+	int DrawCycleMode;
 	HWND hWnd;
 	HDC hDC;
-	DrawArea _draw_eria;
-	bool _keep_aspect;								//アスペクト比の設定
-	YoloObjectDetection* _pt_YoloObjectDetection;	//Yolo
-	PoseNet* _pt_pose;								//ポーズネットAI
+	DrawArea draw_eria;
+	bool keep_aspect;								//アスペクト比の設定
+	YoloObjectDetection* ptYoloOBJECTDECTECTION;	//Yolo
+	PoseNet* pt_pose;								//ポーズネットAI
 	std::vector<std::vector<std::string>> urls;		//カメラ名とURLの２次元配列
-	int _camera_number;								//カメラ番号初期値
-	std::string _file_name;
-	std::ofstream* pAICSV;
+	int camera_number;								//カメラ番号初期値
+	std::string file_name;
+//	std::ofstream* pAICSV;
 };
 
 #define FLAG_TIMESTUMP 0x0001
@@ -33,8 +34,8 @@ bool DrawCycle(
 	cv::VideoCapture* _pt_capture,
 	YoloObjectDetection* _pt_YoloObjectDetection,
 	PoseNet* _pt_pose,
-	const std::string& _str_source1,
-	const std::string& _str_source2,
+	const std::string& _str_location,
+	const std::string& _str_camera_url,
 	std::string& _ai_out_put_string,
 	std::ofstream* _pAICSV,
 	int _display_time_seconds,
@@ -42,6 +43,7 @@ bool DrawCycle(
 );
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 物体認識を行う処理をまとめたもの
 // 0 正常
 // 1 キャプチャー画像の異常
 int DrawCycle_Core_Yolo(
@@ -50,17 +52,16 @@ int DrawCycle_Core_Yolo(
 	HDC hDC,
 	DrawArea _draw_area,
 	bool _keep_aspect,
-	//cv::VideoCapture& _capture,
-	cv::VideoCapture* _pt_capture,
+	//cv::VideoCapture* _pt_capture,
+	cv::Mat& image_input,
 	YoloObjectDetection* _pt_YoloObjectDetection,
-	//	PoseNet* _pt_pose,
-	const std::string& _str_source1,
+	const std::string& _str_location,
 	const std::string& _str_source2,
-	std::string& _ai_out_put_string,
-	std::ofstream* _pAICSV
+	std::string& _ai_out_put_string
 	//	int _display_time_seconds
 );
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 姿勢認識を行う処理をまとめたもの
 // 0 正常
 // 1 キャプチャー画像の異状
 int DrawCycle_Core_Pose(
@@ -69,20 +70,28 @@ int DrawCycle_Core_Pose(
 	HDC hDC,
 	DrawArea _draw_area,
 	bool _keep_aspect,
-	//cv::VideoCapture& _capture,
-	cv::VideoCapture* _pt_capture,
-	//YoloObjectDetection* _pt_YoloObjectDetection,
+	//cv::VideoCapture* _pt_capture,
+	cv::Mat& image_input,
 	PoseNet* _pt_pose
-	//const std::string& _str_source1,
-	//const std::string& _str_source2,
-	//std::string& _ai_out_put_string,
-	//std::ofstream* _pAICSV,
-	//int _display_time_seconds
 );
+
+struct CV2WIN
+{
+	int draw_cycle_mode;
+	HWND hWnd;
+	HDC hDC;
+	DrawArea draw_area;
+	bool keep_aspect;
+	YoloObjectDetection* ptYoloOBJECTDECTECTION;
+	PoseNet* pt_pose;
+	std::vector<std::vector<std::string>> urls;
+	std::string file_name;
+};
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 //指定された画面の部分にIPカメラの映像を表示する
-//ストリームから
+// DrawCycleを呼び出す
+// 一定時間ごとに入力を切り替える
 int DrawCV2Window(
 	int _DrawCycleMode,
 	HWND hWnd,
@@ -91,8 +100,8 @@ int DrawCV2Window(
 	bool _keep_aspect,
 	YoloObjectDetection* _pt_YoloObjectDetection,
 	PoseNet* _pt_pose,
-	std::vector<std::vector<std::string>> urls,
-	std::ofstream* pAICSV);
+	std::vector<std::vector<std::string>> urls
+);
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 //指定された画面の部分に動画ファイルの映像を表示する
@@ -104,8 +113,8 @@ int DrawCV2Windowf(
 	bool _keep_aspect,
 	YoloObjectDetection* _pt_YoloObjectDetection,
 	PoseNet* _pt_pose,
-	std::string _file_name,
-	std::ofstream* pAICSV);
+	std::string _file_name
+);
 
 bool set_cvw_stop(bool _s);
 bool get_cvw_stop();
@@ -121,25 +130,20 @@ int get_display_time_seconds();
 int set_frame_between_time(int _sleep);
 int get_frame_between_time();
 
-//extern std::vector<std::vector<std::string>> cam_urls;// = readRecordsFromFile(filename);
-std::wstring stringToWstring(const std::string& s);
+std::wstring string2wstring(const std::string& s);
 
-extern HWND hText;
-extern HINSTANCE hInstance;
+//extern HWND hHWND_TEXT;
+//extern HINSTANCE hINSTANCE;
 
+extern std::atomic<int> DISPLAY_TIME_SECOND;	// 8;
+extern std::atomic<int> FRAME_INTERVAL_MS;// 100 sleep
+extern std::atomic<bool> AI_TEXT_OUTPUT;
+extern std::atomic<bool> NEXT_SOURCE;
+extern std::atomic<bool> CVW_FILE_PROCESSING;
+extern std::atomic<bool> CVW_FILE_END;
 
-//extern volatile int display_time_seconds;	// 8;
-extern std::atomic<int> display_time_seconds;	// 8;
-//extern volatile int sleep; // 100;
-//extern volatile int fram_interval_ms;// 100 sleep
-extern std::atomic<int> fram_interval_ms;// 100 sleep
-extern std::atomic<bool> ai_text_output;
-extern std::atomic<bool> Next_source;
-extern std::atomic<bool> cvw_file_processing;
-extern std::atomic<bool> cvw_file_end;
-
-extern my_video_writer mvw_org;
-extern my_video_writer mvw_ai;
+extern MyVideoWriter mlVIDEOWRITERORG;
+extern MyVideoWriter mlVIDEOWRITERAI;
 
 //AIのモードを選択する
 #define DRAWCYCLE_YOLO5		1 //yolo
@@ -150,4 +154,25 @@ extern my_video_writer mvw_ai;
 bool PROC_CYCLE(bool _mode);
 int PROC_FIX_CAM(int _cam_number);
 
-extern int Count_VideoCapture;
+extern int COUNT_VIDEOCAPTURE;
+
+//CSVファイル関係　ここで定義するかは疑問 スレッドセーフにするにはグローバル変数にする必要がある。
+extern std::ofstream* pAICSV;
+extern std::mutex FILE_MUTEX;
+//extern std::atomic<bool> fileatomic;
+
+extern std::string AICSVPATH;
+int open_ai_csv_file();
+extern bool AI_DATA_CSV_WRITE; //ファイルに書き込まないときはfalse オーバーフロー防止 
+extern bool AI_DATA_CSV_OVER_WRITE; //上書きするときはtrue 
+
+extern SqlServer SqlServerAi;
+extern SqlServer SqlServerImage;
+extern bool SQL_WRITE;
+extern bool SQL_IMAGEWRITE;
+extern int AISQL_IMAGE_WIDTH;
+extern int AISQL_IMAGE_HEIGHT;
+extern int AISQL_IMAGE_QALITY;
+extern std::wstring AISQL_IMAGE_FORMAT; //JPG or PNG
+
+

@@ -50,14 +50,14 @@ std::string TimeStumpStr()
 	std::time(&rawtime);
 	localtime_s(&timeinfo, &rawtime);
 
-	std::ostringstream _ost;
-	_ost << (1900 + timeinfo.tm_year) << "/" 
+	std::ostringstream _ai_csv_ostring;
+	_ai_csv_ostring << (1900 + timeinfo.tm_year) << "/" 
 		<< std::setw(2) << std::setfill('0') << (timeinfo.tm_mon + 1) << "/" 
 		<< std::setw(2) << std::setfill('0') << timeinfo.tm_mday << " " 
 		<< std::setw(2) << std::setfill('0') << timeinfo.tm_hour << ":" 
 		<< std::setw(2) << std::setfill('0') << timeinfo.tm_min << ":" 
 		<< std::setw(2) << std::setfill('0') << timeinfo.tm_sec;
-	return _ost.str();
+	return _ai_csv_ostring.str();
 }
 
 std::string str_YYMMDD()
@@ -67,11 +67,11 @@ std::string str_YYMMDD()
 	std::time(&rawtime);
 	localtime_s(&timeinfo, &rawtime);
 
-	std::ostringstream _ost;
-	_ost << (1900 + timeinfo.tm_year)
+	std::ostringstream _ai_csv_ostring;
+	_ai_csv_ostring << (1900 + timeinfo.tm_year)
 		<< std::setw(2) << std::setfill('0') << (timeinfo.tm_mon + 1)
 		<< std::setw(2) << std::setfill('0') << timeinfo.tm_mday;
-	return _ost.str();
+	return _ai_csv_ostring.str();
 }
 
 
@@ -97,24 +97,6 @@ int LogFile::TimeStump()
 	return 0;
 }
 
-
-////////////////////////////////////////////////////////////////////////////////////
-//ƒVƒXƒeƒ€ŠÖŒW
-////////////////////////////////////////////////////////////////////////////////////
-/*MFCˆË‘¶
-void DoEvents(int n)
-{
-	MSG msg;
-	for (int i = 0; i < n; i++)
-	{
-		while (::PeekMessage(&msg, NULL, NULL, NULL, PM_NOREMOVE))
-		{
-			if (!AfxGetApp()->PumpMessage())
-				return;
-		}
-	}
-}
-*/
 
 ////////////////////////////////////////////////////////////////////////////////////
 //ŽžŠÔŠÖŒW

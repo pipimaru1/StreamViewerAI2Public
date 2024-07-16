@@ -24,5 +24,7 @@
 //#include <torch/torch.h>
 //#include <onnxruntime_cxx_api.h>
 
+#include <C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include\cuda_runtime.h>
+
 
 

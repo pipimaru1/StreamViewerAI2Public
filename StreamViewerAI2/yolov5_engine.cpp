@@ -3,6 +3,8 @@
 #include "yolov5_engine.h"
 #include "logfile.h"
 #include "mylib.h"
+#include "sqlutil.h"
+//#include <onnxruntime_cxx_api.h>
 
 using namespace cv;
 using namespace std;
@@ -23,17 +25,21 @@ float DEFAULT_CONF_THRESHOLD = 0.4;
 // Constants.
 
 // Colors.
-Scalar BLACK = Scalar(0, 0, 0);
-Scalar BLUE = Scalar(255, 178, 50);
-Scalar KOIBLUE = Scalar(255, 32, 32);
-Scalar YELLOW = Scalar(0, 255, 255);
-Scalar RED = Scalar(0, 0, 255);
-Scalar GREY = Scalar(64, 64, 64);
+Scalar BLACK     = Scalar(0, 0, 0);
+Scalar BLUE      = Scalar(255, 128, 64);
+Scalar CYAN      = Scalar(255, 178, 50);
+Scalar KOIBLUE   = Scalar(255, 32, 32);
+Scalar YELLOW    = Scalar(0, 255, 255);
+Scalar RED       = Scalar(0, 0, 255);
+Scalar GREY      = Scalar(64, 64, 64);
 Scalar DARKGREEN = Scalar(32, 200, 32);
+Scalar DARKDARKGREEN = Scalar(24, 100, 24);
+Scalar ORANGE    = Scalar(0, 160, 255);
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 YoloAIParametors::YoloAIParametors()
 {
+    GPU_Number = 0;
     yolo_version = YOLOV5;
     input_width = DEFAULT_AI_INPUT_WIDTH;
     input_height = DEFAULT_AI_INPUT_HEIGHT;
@@ -53,7 +59,6 @@ YoloAIParametors::~YoloAIParametors()
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #define LABEL_IN_BOX false
 #define LABEL_OUT_BOX true
-//void draw_label(Mat& input_image, string label, int left, int top, float _font_scale, int _thickness_font, int _fontface, cv::Scalar _rect_color)
 void draw_label(Mat& input_image, string label, int left, int top, CvFontParam cfp, cv::Scalar _rect_color)
 {
     // Display the label at the top of the bounding box.
@@ -194,13 +199,62 @@ int extract_object_data(
 
     if (yolo_version == YOLOV8)
     { 
+
+#ifdef _CUDA
+        //YOLOV8でバウンディングボックスがちゃんと出ないのはこのあたりの行列操作が原因らしい
         //https://github.com/ultralytics/ultralytics/issues/1852
         rows = _outputs[0].size[2];
         dimensions = _outputs[0].size[1];
         _outputs[0] = _outputs[0].reshape(1, dimensions);
         cv::transpose(_outputs[0], _outputs[0]);
-        float* data = (float*)_outputs[0].data; //データ領域のポインタかな???
         
+        //cv::Mat rawData = _outputs[0];
+        //rawData = rawData.t();
+        //int strideNum = 8400;//outputNodeDims[1];//8400
+        //int signalResultNum = 84;  //outputNodeDims[2];//84
+
+        float* data = (float*)_outputs[0].data; //データ領域のポインタかな???
+        for (int i = 0; i < rows; ++i)
+        //for (int i = 0; i < strideNum; ++i)
+        {
+            DetectedObject _obj;    //一時データ置き場
+
+            float* classes_scores = data + 4;
+            cv::Mat scores(1, (int)class_name.size(), CV_32FC1, classes_scores);
+            cv::Point class_id;
+            double maxClassScore;
+            minMaxLoc(scores, 0, &maxClassScore, 0, &class_id);
+
+            if (maxClassScore > _confidence_thresgold)
+            {
+                //confidences.push_back((float));
+                //class_ids.push_back(class_id.x);
+                _obj.classID = class_id.x;
+                _obj.confidence = maxClassScore;
+                _obj.cx = data[0];
+                _obj.cy = data[1];
+                _obj.w = data[2];
+                _obj.h = data[3];
+
+                //イメージの大きさに合わせてバウンディングボックスの値をセットする
+                _obj.bbox.x = int((_obj.cx - 0.5 * _obj.w) * _x_factor);
+                _obj.bbox.y = int((_obj.cy - 0.5 * _obj.h) * _y_factor);
+                _obj.bbox.width = int(_obj.w * _x_factor);
+                _obj.bbox.height = int(_obj.h * _y_factor);
+
+                _objects.push_back(_obj);
+            }
+            data += dimensions;
+            //data += signalResultNum;
+        }
+#else
+        //https://github.com/ultralytics/ultralytics/issues/1852
+        rows = _outputs[0].size[2];
+        dimensions = _outputs[0].size[1];
+        _outputs[0] = _outputs[0].reshape(1, dimensions);
+        cv::transpose(_outputs[0], _outputs[0]);
+
+        float* data = (float*)_outputs[0].data; //データ領域のポインタかな???
         for (int i = 0; i < rows; ++i)
         {
             DetectedObject _obj;    //一時データ置き場
@@ -232,6 +286,7 @@ int extract_object_data(
             }
             data += dimensions;
         }
+#endif
     }
     else if (yolo_version == YOLOV5)
     {
@@ -331,24 +386,28 @@ int pre_process(vector<Mat>& outputs,Mat& input_image, Net& net, float input_wid
 
 //指示したオブジェクトだけを表示する場合はfalseにする
 #define VIEW_ALL true 
+
+long long EventID = 0;
 //AIの結果をストリームに出力する
 //描画機能は省いた 
 //いずれpost_processと統合したほうがいい
-//AIの結果を文字列として_ostに出力する
+//AIの結果を文字列として_ai_csv_ostringに出力する
 // 結果はカンマで区切るB
 //_headerは項目の先頭につけるヘッダ　カメラ番号、フレーム番、時間など
 //#define CLASSIFICATION_SIZE 11
 Mat post_process_str(
     YoloAIParametors yp,
     YoloFontsParam yfp,
-    bool draw_image,            //ふつうはture, falseにすると描画処理をしない。
-    const Mat& input_image,     //このMatに上書きして返す
-    vector<Mat>& outputs,       //aiの分類の情報
+    bool draw_image,                        //ふつうはture, falseにすると描画処理をしない。
+    const Mat& input_image,                 //このMatに上書きして返す
+    vector<Mat>& outputs,                   //aiの分類の情報
     const vector<string>& class_name,
     int& number_of_persons, std::vector<std::string>& class_list_view, 
-    std::string _header,            //日付等
-    std::string& _ost,               //書き込んだ文字列を返す時の格納場所
-    int _version                //yoloのバージョン
+    //std::string _header,                  //日付等
+    AiRecordHeader& _ai_rec_header,         //日付等
+    std::string& _ai_csv_ostring,           //書き込んだ文字列を返す時の格納場所
+    std::vector<AiSqlOutput>& _sql_ai_data,
+    int _version                            //yoloのバージョン
 )
 {
     //何も検出していなければそのまま返す
@@ -489,6 +548,10 @@ Mat post_process_str(
     //検出した物体の重なり具合から同一性を判断し抽出する関数 indicesに抽出したidの配列が入れられる
     cv::dnn::NMSBoxes(boxes, confidences, yp.score_threshold, yp.nms_threshold, indices);
     number_of_persons = 0;
+
+    //SQL
+    //std::vector<AiSqlOutput> sql_ai_data;
+
     for (int i = 0; i < indices.size(); i++)
     {
         int idx = indices[i];
@@ -519,11 +582,15 @@ Mat post_process_str(
             object_name.compare("driver") == 0)
         {
             number_of_persons++;
-            RECTCOLOR = BLUE;
+            RECTCOLOR = CYAN;
         }
         else if (object_name.compare("forklift") == 0)
         {
             RECTCOLOR = KOIBLUE;
+        }
+        else if (object_name.compare("truck") == 0)
+        {
+            RECTCOLOR = ORANGE;
         }
         else if (object_name.compare("excavator") == 0 ||
             object_name.compare("bulldozer") == 0 ||
@@ -532,6 +599,9 @@ Mat post_process_str(
         {
             RECTCOLOR = YELLOW;
         }
+        else if (object_name.compare("pallet") == 0 ||
+                 object_name.compare("cargo") == 0 )
+            RECTCOLOR = DARKDARKGREEN;
         else
             RECTCOLOR = DARKGREEN;
 
@@ -546,8 +616,41 @@ Mat post_process_str(
             draw_label(output_image, label, left, top, yfp.label, RECTCOLOR);
         }
         
+        AiSqlOutput _ai_sql_output;
+        _ai_sql_output.EventID = EventID;  // INT,
+        _ai_sql_output.Category = L"AI";
+        _ai_sql_output.Location = _ai_rec_header.Location;
+        _ai_sql_output.StreamURL = _ai_rec_header.StreamURL;
+        _ai_sql_output.Timestamp = string2wstring(TimeStumpStr());   // DATETIME,
+        _ai_sql_output.Index_per_frame = 1;                           // INT,
+        _ai_sql_output.index_max_frame = indices.size();              //  INT,
+        _ai_sql_output.idx = idx; //  INT,
+        _ai_sql_output.ClassID = class_ids[idx]; //  INT,
+        _ai_sql_output.Confidence = confidences[idx]; //  FLOAT,
+        _ai_sql_output.ClassName = string2wstring(class_name[class_ids[idx]]); //  NVARCHAR(50),
+        _ai_sql_output.ScoreThreshold = yp.score_threshold; //  FLOAT,
+        _ai_sql_output.NmsThreshold = yp.nms_threshold; //  FLOAT,
+        _ai_sql_output.ConfidenceThreshold = yp.confidence_thresgold; //  FLOAT,
+        _ai_sql_output.x0 = left;                         //  INT,
+        _ai_sql_output.y0 = top;                          //  INT,
+        _ai_sql_output.x1 = (left + width);               //  INT,
+        _ai_sql_output.y1 = (top + height);               //  INT,
+        _ai_sql_output.Width = width;                     //  INT,
+        _ai_sql_output.Height = height;                   //  INT,
+        _ai_sql_output.OnnxFileName = string2wstring(getFileName( yp.onnx_file_name)); //  NVARCHAR(255),
+        _ai_sql_output.NamesFileName = string2wstring(getFileName(yp.names_file_name)); //  NVARCHAR(255),
+        _ai_sql_output.ImageWidth = input_image.cols; //  INT,
+        _ai_sql_output.ImageHeight = input_image.rows; //  INT
+
+        EventID++;  // INT,
+
+        _sql_ai_data.push_back(_ai_sql_output);
+
+        //旧いコードで残す
+        std::ostringstream _header;
+        _header << "AI,\"" << wstring2string( _ai_rec_header.Location) << "\"," << wstring2string(_ai_rec_header.StreamURL)<< "," << wstring2string(_ai_rec_header.Timestamp);
         //追加した処理　ストリームに解析した結果を保存
-        _os << _header << ","
+        _os << _header.str() << ","
             << i << ","
             << indices.size() << ","
             << idx << ","
@@ -563,13 +666,24 @@ Mat post_process_str(
             << (top + height) << ","
             << width << ","
             << height << ","
-            << yp.onnx_file_name << ","
-            << yp.names_file_name << ","
+            << getFileName(yp.onnx_file_name) << ","
+            << getFileName(yp.names_file_name) << ","
             << input_image.cols << ","
             << input_image.rows << endl;
-
     }
-    _ost = _os.str().c_str();
+    //サーバーとデータ格納先の設定
+    if (0)
+    {
+        SqlServer _sql_server;
+        _sql_server.server_name = L"140.81.145.5\\AWIOTQ01";
+        _sql_server.db_name = L"aicamera";
+        _sql_server.uid = L"sa";
+        _sql_server.pwd = L"AWSqlServer01";
+
+        Sql_Write(_sql_server, _sql_ai_data, _sql_ai_data.size());
+    }
+    
+    _ai_csv_ostring = _os.str().c_str();
     return input_image;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -611,7 +725,7 @@ YoloObjectDetection::YoloObjectDetection()
 //GPUデバイスを選択するときは、cuda_runtime.hをインクルードして、cudaSetDevice(int device)を指定する。
 //#include <cuda_runtime.h>
 //cudaSetDevice(0);
-int YoloObjectDetection::init_yolov5(YoloAIParametors yp, bool _count_of_person, bool __count_of_time)
+int YoloObjectDetection::init_object_detection(YoloAIParametors yp, bool _count_of_person, bool __count_of_time)
 {
     //USES_CONVERSION;
     YP = yp;
@@ -640,20 +754,22 @@ int YoloObjectDetection::init_yolov5(YoloAIParametors yp, bool _count_of_person,
         ++YP.clssification_size;
     }
      // Load model. yolov8だとreadNetまたはreadNetFromONNXでエラーが出る
+    LOGMSG("dnn::readNetFromONNX:" << YP.onnx_file_name);
     try
     {
-        //cudaSetDevice(0);
-        LOGMSG("dnn::readNetFromONNX:" <<YP.onnx_file_name);
-        net = cv::dnn::readNetFromONNX(YP.onnx_file_name);
-        //net = cv::dnn::readNet(YP.onnx_file_name);
 
 #ifdef _CUDA
+    #ifndef _OPENCV470
+        //cudaSetDevice(YP.GPU_Number);
+    #endif
+        net = cv::dnn::readNetFromONNX(YP.onnx_file_name);
         net.setPreferableBackend(DNN_BACKEND_CUDA);
         net.setPreferableTarget(DNN_TARGET_CUDA_FP16);
         //net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA_FP16);
         //net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
         //net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
 #else
+        net = cv::dnn::readNetFromONNX(YP.onnx_file_name);
         net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
         net.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
 #endif
@@ -670,7 +786,6 @@ int YoloObjectDetection::init_yolov5(YoloAIParametors yp, bool _count_of_person,
     return 1;
 }
 
-
 vector<Mat>& YoloObjectDetection::_pre_process(Mat& input_image)
 {
     if (input_image.empty() || input_image.data == NULL || input_image.cols == 0; input_image.rows == 0)
@@ -683,10 +798,16 @@ vector<Mat>& YoloObjectDetection::_pre_process(Mat& input_image)
     return detections;
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+//AIの解析結果を表示したり、ファイルに書き込んだり、データベースに入れたりする
+//将来は機能を三つに分けてシンプルにする
 cv::Mat YoloObjectDetection::_post_process(
     bool draw_image,    //ふつうはture。falseにすると描画処理をせず、解析データをテキストに書くだけになる。
     const cv::Mat& input_image, 
-    std::string _header, std::string& _ost
+    //std::string _header, 
+    AiRecordHeader& _ai_rec_header,
+    std::string& _ai_csv_ostring,
+    std::vector<AiSqlOutput>& _sql_ai_data
 )
 {
     Mat img;
@@ -703,8 +824,10 @@ cv::Mat YoloObjectDetection::_post_process(
         detections,
         list_of_class,         //ファイルから読み込んだ分類名のリスト
         number_of_persons, class_list_view,
-        _header,            //日付等
-        _ost,              //書き込んだ文字列を返す時の格納場所
+        //_header,            //日付等
+        _ai_rec_header,            //日付等
+        _ai_csv_ostring,              //書き込んだ文字列を返す時の格納場所
+        _sql_ai_data,
         YP.yolo_version
         );
 
@@ -713,7 +836,7 @@ cv::Mat YoloObjectDetection::_post_process(
     if (img.data!=NULL)
     {
         putText(img, label, TEXT_POINT_PERSON, YFP.person.face, YFP.person.scale, BLACK, YFP.person.thickness + 1);
-        putText(img, label, TEXT_POINT_PERSON, YFP.person.face, YFP.person.scale, BLUE, YFP.person.thickness);
+        putText(img, label, TEXT_POINT_PERSON, YFP.person.face, YFP.person.scale, CYAN, YFP.person.thickness);
          
         ostringstream _os;
         _os << "AI:" << YP.onnx_file_name;

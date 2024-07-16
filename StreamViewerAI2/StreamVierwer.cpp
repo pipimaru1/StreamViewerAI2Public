@@ -41,8 +41,8 @@ std::string poseproto;
 HINSTANCE hInst;                    // 現在のインターフェイス
 WCHAR szTitle[MAX_LOADSTRING];      // タイトル バーのテキスト
 WCHAR szWindowClass[MAX_LOADSTRING];// メイン ウィンドウ クラス名
-HWND hText;                         //テキストボックス
-HINSTANCE hInstance;                //テキストボックスのインスタンス
+//HWND hHWND_TEXT;                         //テキストボックス
+//HINSTANCE hINSTANCE;                //テキストボックスのインスタンス
 
 //グローバル変数
 //extern std::vector<std::string> urls;
@@ -57,23 +57,22 @@ std::thread* main_th[VIEWMAX] = {
     nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,
     nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr
 };
-//volatile bool wm_paint_now = false;
-std::atomic<bool> wm_paint_now = false;
+//volatile bool WM_PAINT_NOW = false;
+std::atomic<bool> WM_PAINT_NOW = false;
 
 std::vector<std::vector<std::string>> cam_urls; //[0]にはタイトル、[1]にはurlが入っている
 
 //AI
-YoloObjectDetection* pt_YoloObjectDetection = nullptr;		//サムネイル表示の時のAIクラス 複数のカメラでAIを共有、管理クラスからポインタをコピー
+YoloObjectDetection* ptYoloOBJECTDECTECTION = nullptr;		//サムネイル表示の時のAIクラス 複数のカメラでAIを共有、管理クラスからポインタをコピー
 int _ai_running = 0;
-#define CSVFILE "ai_proccessed.csv"
-std::ofstream* pAICSV = nullptr;
-//volatile bool bSuppressPaint = FALSE;
-std::atomic<bool> bSuppressPaint = FALSE;
-int _pose_running = 0;
+
+//volatile bool bSUPPRESS_PAINT = FALSE;
+std::atomic<bool> bSUPPRESS_PAINT = FALSE;
+//int POSE_RUNNING = 0;
 
 HWND hEdit;
 HBRUSH hbrBlackBrush;
-PoseNet* _ptg_posenet;
+PoseNet* ptPOSENET;
 
 //HOMEDRIVE = C:
 //HOMEPATH = \Users\km47381
@@ -84,7 +83,8 @@ std::string MP4HDAI  = "video_hd_ai";   //録画する時使用するファイ�
 std::string MP4PATH  = "%HOMEDRIVE%%HOMEPATH%\\";     //録画する時使用するファイル名
 std::string MP4EXT   = ".mp4";                      //録画する時使用するファイル名
 
-#define INIFILE "default.ini"
+//#define INIFILE "default.ini"
+std::string init_file = "default.ini";
 #define APPMODE_NETCAM 0
 #define APPMODE_USBCAM 1
 #define APPMODE_MOVFILE 2
@@ -98,78 +98,111 @@ int DrawCycleMode = DRAWCYCLE_YOLO5;
 int read_write_file(std::string _inifile_path, int rw);
 
 // このコード モジュールに含まれる関数の宣言を転送します:
-ATOM                MyRegisterClass(HINSTANCE hInstance);
+ATOM                MyRegisterClass(HINSTANCE _hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
 //bool Mode4View = false;
 int ViewMode = IDM_VIEW_1;
-
 int WINDOW_MAX = 1;
+int GPU_Number = 0;
 
+int AISQL_IMAGE_WIDTH   = 640;
+int AISQL_IMAGE_HEIGHT  = 480;
+int AISQL_IMAGE_QALITY = 90;
+std::wstring AISQL_IMAGE_FORMAT = L"JPG"; //JPG or PNG
+
+
+//設定ファイルの読み書き 
 int read_write_file(std::string _inifile_path, int rw)
 {
     if (rw == RWFILE_WRITE)
     {
         std::ofstream inifile;
-        inifile.open(INIFILE, std::ios::out);
-        if (DrawCycleMode == DRAWCYCLE_POSENET)
-            inifile << "AI_MODE =              " << "POSE_NET" << std::endl;
-        else if(DrawCycleMode==DRAWCYCLE_YOLO5)
-            inifile << "AI_MODE =              " << "OBJECT_DETECTION" << std::endl;
-        else if (DrawCycleMode == DRAWCYCLE_YOLO8)
-            inifile << "AI_MODE =              " << "OBJECT_DETECTION_YOLOV8" << std::endl;
-        else
-            inifile << "AI_MODE =              " << "STREAM" << std::endl;
+        //inifile.open(INIFILE, std::ios::out);
+        inifile.open(_inifile_path, std::ios::out);
 
-        if (ViewMode == IDM_VIEW_4)
-            inifile << "VIEW_MODE =           " << "4" << std::endl;
-        else if (ViewMode == IDM_VIEW_6)
-            inifile << "VIEW_MODE =           " << "6" << std::endl;
-        else if (ViewMode == IDM_VIEW_9)
-            inifile << "VIEW_MODE =           " << "9" << std::endl;
-        else if (ViewMode == IDM_VIEW_12)
-            inifile << "VIEW_MODE =           " << "12" << std::endl;
-        else if (ViewMode == IDM_VIEW_16)
-            inifile << "VIEW_MODE =           " << "16" << std::endl;
-        else if (ViewMode == IDM_VIEW_36)
-            inifile << "VIEW_MODE =           " << "36" << std::endl;
-        else if (ViewMode == IDM_VIEW_64)
-            inifile << "VIEW_MODE =           " << "64" << std::endl;
-        else
-            inifile << "VIEW_MODE =           " << "1" << std::endl;
+        inifile << "[BASIC SETTINGS]     " << std::endl;
+        //DrawCycleMode
+        if (DrawCycleMode == DRAWCYCLE_POSENET)     inifile << "AI_MODE =              " << "POSE_NET" << std::endl;
+        else if(DrawCycleMode==DRAWCYCLE_YOLO5)     inifile << "AI_MODE =              " << "OBJECT_DETECTION" << std::endl;
+        else if (DrawCycleMode == DRAWCYCLE_YOLO8)  inifile << "AI_MODE =              " << "OBJECT_DETECTION_YOLOV8" << std::endl;
+        else                                        inifile << "AI_MODE =              " << "STREAM" << std::endl;
 
+        //ViewMode  
+        if (ViewMode == IDM_VIEW_4)                 inifile << "VIEW_MODE =            " << "4" << std::endl;
+        else if (ViewMode == IDM_VIEW_6)            inifile << "VIEW_MODE =            " << "6" << std::endl;
+        else if (ViewMode == IDM_VIEW_9)            inifile << "VIEW_MODE =            " << "9" << std::endl;
+        else if (ViewMode == IDM_VIEW_12)           inifile << "VIEW_MODE =            " << "12" << std::endl;
+        else if (ViewMode == IDM_VIEW_16)           inifile << "VIEW_MODE =            " << "16" << std::endl;
+        else if (ViewMode == IDM_VIEW_36)           inifile << "VIEW_MODE =            " << "36" << std::endl;
+        else if (ViewMode == IDM_VIEW_64)           inifile << "VIEW_MODE =            " << "64" << std::endl;
+        else                                        inifile << "VIEW_MODE =            " << "1" << std::endl;
+
+        inifile << "[LOADFILE SETTINGS]     " << std::endl;
         inifile << "STREAM_LIST_FILE =     " << url_file << std::endl;
         inifile << "ONNX_FILE =            " << onnx_file << std::endl;
         inifile << "NAMES_FILE =           " << names_file << std::endl;
         inifile << "ONNX_FILE_YOLOV8 =     " << onnx_file8 << std::endl;
         inifile << "NAMES_FILE_YOLOV8 =    " << names_file8 << std::endl;
-        inifile << "DISPLAY_TIME[SECOND] = " << display_time_seconds << std::endl;
+        inifile << "DISPLAY_TIME[SECOND] = " << DISPLAY_TIME_SECOND << std::endl;
         //inifile << "POSE_WEIGHT_FILE =     \"" << poseweight << "\"" << std::endl;
         //inifile << "POSE_PROTO_FILE =      \"" << poseproto << "\"" << std::endl;
         inifile << "POSE_WEIGHT_FILE =     " << poseweight << std::endl;
         inifile << "POSE_PROTO_FILE =      " << poseproto << std::endl;
-        inifile << "SLEEP_FRAME =          " << fram_interval_ms << std::endl;
-        inifile << "MOVIE_FILEE =          " << video_file_path << std::endl;
+        inifile << "SLEEP_FRAME =          " << FRAME_INTERVAL_MS << std::endl;
+        inifile << "MOVIE_FILE =           " << video_file_path << std::endl;
+ 
+        inifile << "[RECORD SETTINGS]     " << std::endl;
         inifile << "MP4VHA =               " << MP4VHA << std::endl;    //録画する時使用するファイル名
         inifile << "MP4VHAAI =             " << MP4VHAAI << std::endl;  //録画する時使用するファイル名
         inifile << "MP4HD =                " << MP4HD << std::endl;     //録画する時使用するファイル名
         inifile << "MP4HDAI =              " << MP4HDAI << std::endl;   //録画する時使用するファイル名
         inifile << "MP4PATH =              " << MP4PATH << std::endl;   //録画する時使用するファイル名
         inifile << "WINDOW_MAX =           " << WINDOW_MAX << std::endl;
-        inifile << "CAPTURE_TIMEOUT =      " << CAPOPEN_TIMEOUT << std::endl;
-        //if(yp)
+
+        inifile << "[YOLO SETTINGS]     " << std::endl;
         inifile << "YOLO_SCORE_THRESHOLD = " << DEFAULT_SCORE_THRESHOLD << std::endl;
         inifile << "YOLO_NMS_THRESHOLD =   " << DEFAULT_NMS_THRESHOLD << std::endl;
         inifile << "YOLO_CONF_THRESHOLD =  " << DEFAULT_CONF_THRESHOLD << std::endl;
+        inifile << "GPU_DEVICE_NUMBER =    " << GPU_Number << std::endl;
+
+        inifile << "[OTHER SETTINGS]     " << std::endl;
+        inifile << "CAPTURE_TIMEOUT =      " << CAPOPEN_TIMEOUT << std::endl;
+
+        inifile << "[AI DATA SAVE TO CSV]  " << std::endl;
+        inifile << "AICSV_WRITE =          " << (int)AI_DATA_CSV_WRITE << std::endl;
+        inifile << "AICSV_OVERWRITE =      " << (int)AI_DATA_CSV_OVER_WRITE << std::endl;
+        inifile << "AICSV_PATH =           " << AICSVPATH << std::endl;   //AIの認識データを出力CSVファイルを置くパス
+
+        inifile << "[SQL INFOMATIONS]      " << std::endl;
+        inifile << "AISQL_SERVER =         " << wstring2string(SqlServerAi.server_name) << std::endl;
+        inifile << "AISQL_DBNAME =         " << wstring2string(SqlServerAi.db_name) << std::endl;
+        inifile << "AISQL_UID =            " << wstring2string(SqlServerAi.uid) << std::endl;
+        inifile << "AISQL_PWD =            " << wstring2string(SqlServerAi.pwd) << std::endl;
+
+        inifile << "[AI DATA SAVE TO SQL]  " << std::endl;
+        inifile << "AISQL_WRITE =          " << (int)SQL_WRITE << std::endl;
+        inifile << "AISQL_TABLE =          " << wstring2string(SqlServerAi.table) << std::endl;
+
+        inifile << "[IMAGE SAVE TO SQL]    " << std::endl;
+        inifile << "AISQL_IMAGEWRITE =     " << (int)SQL_IMAGEWRITE << std::endl;
+        inifile << "AISQL_IMAGETABLE =     " << wstring2string(SqlServerImage.table) << std::endl;
+        inifile << "AISQL_IMAGEINDEXFLR =  " << wstring2string(SqlServerImage.image_index_folder) << std::endl;
+
+        inifile << "AISQL_IMAGE_WIDTH =    " << AISQL_IMAGE_WIDTH << std::endl;
+        inifile << "AISQL_IMAGE_HEIGHT =   " << AISQL_IMAGE_HEIGHT << std::endl;
+        inifile << "AISQL_IMAGE_QALITY =   " << AISQL_IMAGE_QALITY << std::endl;
+        inifile << "AISQL_IMAGE_FORMAT =   " << wstring2string(AISQL_IMAGE_FORMAT) << std::endl;
+
         inifile.close();
     }
-    else
+    else //設定ファイル読み取り
     {
         std::ifstream inifile;
         char buf[2048];
-        inifile.open(INIFILE, std::ios::in);
+        inifile.open(_inifile_path, std::ios::in);
         if (inifile.is_open())
         {
             while (inifile.getline(buf, 2048))
@@ -185,63 +218,48 @@ int read_write_file(std::string _inifile_path, int rw)
 
                 if (paramator_name == "AI_MODE")
                 {
-                    if (paramator_value == "POSE_NET")
-                        DrawCycleMode = DRAWCYCLE_POSENET;
-                    else if (paramator_value == "POSE")
-                        DrawCycleMode = DRAWCYCLE_POSENET;
-                    else if (paramator_value == "OBJECT_DETECTION")
-                        DrawCycleMode = DRAWCYCLE_YOLO5;
-                    else if (paramator_value == "YOLOV")
-                        DrawCycleMode = DRAWCYCLE_YOLO5;
-                    else if (paramator_value == "YOLOV5")
-                        DrawCycleMode = DRAWCYCLE_YOLO5;
-
-                    else if (paramator_value == "OBJECT_DETECTION_YOLOV8")
-                        DrawCycleMode = DRAWCYCLE_YOLO8;
-                    else if (paramator_value == "YOLOV8")
-                        DrawCycleMode = DRAWCYCLE_YOLO8;
-
-                    else if (paramator_value == "STREAM")
-                        DrawCycleMode = DRAWCYCLE_STREAM;
-                    else
-                        DrawCycleMode = DRAWCYCLE_STREAM;
+                    if (paramator_value == "POSE_NET")              DrawCycleMode = DRAWCYCLE_POSENET;
+                    else if (paramator_value == "POSE")             DrawCycleMode = DRAWCYCLE_POSENET;
+                    else if (paramator_value == "OBJECT_DETECTION") DrawCycleMode = DRAWCYCLE_YOLO5;
+                    else if (paramator_value == "YOLOV")            DrawCycleMode = DRAWCYCLE_YOLO5;
+                    else if (paramator_value == "YOLOV5")           DrawCycleMode = DRAWCYCLE_YOLO5;
+                    else if (paramator_value == "OBJECT_DETECTION_YOLOV8")  
+                                                                    DrawCycleMode = DRAWCYCLE_YOLO8;
+                    else if (paramator_value == "YOLOV8")           DrawCycleMode = DRAWCYCLE_YOLO8;
+                    else if (paramator_value == "STREAM")           DrawCycleMode = DRAWCYCLE_STREAM;
+                    else                                            DrawCycleMode = DRAWCYCLE_STREAM;
                 }
                 else if (paramator_name == "VIEW_MODE")
                 {
-                    if (paramator_value == "4")
-                        ViewMode = IDM_VIEW_4;
-                    else if (paramator_value == "6")
-                        ViewMode = IDM_VIEW_6;
-                    else if (paramator_value == "9")
-                        ViewMode = IDM_VIEW_9;
-                    else if (paramator_value == "12")
-                        ViewMode = IDM_VIEW_12;
-                    else if (paramator_value == "16")
-                        ViewMode = IDM_VIEW_16;
-                    else if (paramator_value == "36")
-                        ViewMode = IDM_VIEW_36;
-                    else if (paramator_value == "64")
-                        ViewMode = IDM_VIEW_64;
-                    else
-                        ViewMode = IDM_VIEW_1;
+                    if (paramator_value == "4")         ViewMode = IDM_VIEW_4;
+                    else if (paramator_value == "6")    ViewMode = IDM_VIEW_6;
+                    else if (paramator_value == "9")    ViewMode = IDM_VIEW_9;
+                    else if (paramator_value == "12")   ViewMode = IDM_VIEW_12;
+                    else if (paramator_value == "16")   ViewMode = IDM_VIEW_16;
+                    else if (paramator_value == "36")   ViewMode = IDM_VIEW_36;
+                    else if (paramator_value == "64")   ViewMode = IDM_VIEW_64;
+                    else                                ViewMode = IDM_VIEW_1;
                 }
                 else if (paramator_name == "WINDOW_MAX")
                 {
-                    if (paramator_value == "1")
-                        WINDOW_MAX = 1;
-                    else
-                        WINDOW_MAX = 0;
+                    if      (paramator_value == "1")    WINDOW_MAX = 1; //最大化
+                    else if (paramator_value == "2")    WINDOW_MAX = 2; //メニューバーを残して最大化
+                    else if (paramator_value == "3")    WINDOW_MAX = 3; //マルチディスプレイの1に最大化
+                    else if (paramator_value == "4")    WINDOW_MAX = 4; //マルチディスプレイの2に最大化
+                    else if (paramator_value == "5")    WINDOW_MAX = 5; //マルチディスプレイの3に最大化
+                    else if (paramator_value == "6")    WINDOW_MAX = 6; //マルチディスプレイの4に最大化
+                    else                                WINDOW_MAX = 0; //最大化しない
                 }
                 else if (paramator_name == "STREAM_LIST_FILE")      url_file = paramator_value;
                 else if (paramator_name == "ONNX_FILE")             onnx_file = paramator_value;
                 else if (paramator_name == "NAMES_FILE")            names_file = paramator_value;
                 else if (paramator_name == "ONNX_FILE_YOLOV8")      onnx_file8 = paramator_value;
                 else if (paramator_name == "NAMES_FILE_YOLOV8")     names_file8 = paramator_value;
-                else if (paramator_name == "DISPLAY_TIME[SECOND]")  display_time_seconds = std::stoi(paramator_value);
+                else if (paramator_name == "DISPLAY_TIME[SECOND]")  DISPLAY_TIME_SECOND = std::stoi(paramator_value);
                 else if (paramator_name == "POSE_WEIGHT_FILE")      poseweight = paramator_value;
                 else if (paramator_name == "POSE_PROTO_FILE")       poseproto = paramator_value;
-                else if (paramator_name == "SLEEP_FRAME")           fram_interval_ms = std::stoi(paramator_value);
-                else if (paramator_name == "MOVIE_FILEE")           video_file_path = paramator_value;
+                else if (paramator_name == "SLEEP_FRAME")           FRAME_INTERVAL_MS = std::stoi(paramator_value);
+                else if (paramator_name == "MOVIE_FIEE")            video_file_path = paramator_value;
                 else if (paramator_name == "MP4VHA")                MP4VHA = paramator_value;
                 else if (paramator_name == "MP4VHAAI")              MP4VHAAI = paramator_value;
                 else if (paramator_name == "MP4HD")                 MP4HD = paramator_value;
@@ -251,28 +269,41 @@ int read_write_file(std::string _inifile_path, int rw)
                 else if (paramator_name == "YOLO_SCORE_THRESHOLD")  DEFAULT_SCORE_THRESHOLD = std::stof(paramator_value);
                 else if (paramator_name == "YOLO_NMS_THRESHOLD")    DEFAULT_NMS_THRESHOLD = std::stof(paramator_value);
                 else if (paramator_name == "YOLO_CONF_THRESHOLD")   DEFAULT_CONF_THRESHOLD = std::stof(paramator_value);
+                else if (paramator_name == "AICSV_PATH")             AICSVPATH = paramator_value;
+                else if (paramator_name == "AICSV_WRITE")           AI_DATA_CSV_WRITE = (bool)std::stoi(paramator_value);
+                else if (paramator_name == "AICSV_OVERWRITE")       AI_DATA_CSV_OVER_WRITE = (bool)std::stoi(paramator_value);
+                //SQLサーバーの設定 テーブル以外は同じ
+                else if (paramator_name == "AISQL_WRITE")           SQL_WRITE = (bool)std::stoi(paramator_value);
+                else if (paramator_name == "AISQL_SERVER")          SqlServerImage.server_name  = SqlServerAi.server_name = string2wstring(paramator_value);
+                else if (paramator_name == "AISQL_DBNAME")          SqlServerImage.db_name      = SqlServerAi.db_name     = string2wstring(paramator_value);
+                else if (paramator_name == "AISQL_UID")             SqlServerImage.uid          = SqlServerAi.uid         = string2wstring(paramator_value);
+                else if (paramator_name == "AISQL_PWD")             SqlServerImage.pwd          = SqlServerAi.pwd         = string2wstring(paramator_value);
+                else if (paramator_name == "AISQL_TABLE")                                           SqlServerAi.table     = string2wstring(paramator_value);
+                else if (paramator_name == "AISQL_IMAGEWRITE")      SQL_IMAGEWRITE = (bool)std::stoi(paramator_value);
+                else if (paramator_name == "AISQL_IMAGETABLE")      SqlServerImage.table                                  = string2wstring(paramator_value);
+                else if (paramator_name == "AISQL_IMAGEINDEXFLR")   SqlServerImage.image_index_folder                     = string2wstring(paramator_value);
+
+                else if (paramator_name == "AISQL_IMAGE_WIDTH")     AISQL_IMAGE_WIDTH = std::stoi(paramator_value);
+                else if (paramator_name == "AISQL_IMAGE_HEIGHT")    AISQL_IMAGE_HEIGHT = std::stoi(paramator_value);
+                else if (paramator_name == "AISQL_IMAGE_QALITY")    AISQL_IMAGE_QALITY = std::stoi(paramator_value);
+                else if (paramator_name == "AISQL_IMAGE_FORMAT")    AISQL_IMAGE_FORMAT = string2wstring(paramator_value);
+
+                else if (paramator_name == "GPU_DEVICE_NUMBER")     GPU_Number = std::stoi(paramator_value);
             }
         }
     }
     return 0;
 }
 
-
-int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
+int APIENTRY wWinMain(_In_ HINSTANCE _hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
                      _In_ LPWSTR    lpCmdLine,
                      _In_ int       nCmdShow)
 {
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
-
-    if(0)
-        pAICSV = new std::ofstream(CSVFILE, std::ios_base::app); //追加書き込み
-    else
-        pAICSV = new std::ofstream(CSVFILE, std::ios_base::out); //上書き
-
     // TODO: ここにコードを挿入してください。
-   
+ 
     // コマンドライン引数を取得
     LPWSTR _lpCmdLine = GetCommandLineW();
     // コマンドライン引数を個々の引数に分解
@@ -290,10 +321,24 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     onnx_file8 = _AI_ONNX8;
     names_file8 = _AI_NAMES8;
 
-    //前回設定の読み込み
-    read_write_file(INIFILE, RWFILE_READ);
-
+    ///////////////////////////////////////////////////////////////////////////////
+    //設定ファイルのコマンドライン引数だけ先にゲット
     int i = 0;
+    for (i = 0; i < nArgs; i++)
+    {
+        if (wcscmp(szArglist[i], L"-i") == 0
+            || wcscmp(szArglist[i], L"-ini") == 0)
+        {
+            std::filesystem::path _fp(szArglist[i + 1]);
+            init_file = _fp.string();
+            i++;
+        }
+    }
+
+    //前回設定の読み込み
+    read_write_file(init_file, RWFILE_READ);
+
+    i = 0;
     for (i = 0; i < nArgs; i++)
     {
         //int msgboxID2 = MessageBox(NULL, szArglist[i], L"test", MB_ICONWARNING | MB_OK);
@@ -309,13 +354,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         else if (wcscmp(szArglist[i], L"-f") == 0
             || wcscmp(szArglist[i], L"-frame") == 0)
         {
-            fram_interval_ms = _wtoi(szArglist[i + 1]);
+            FRAME_INTERVAL_MS = _wtoi(szArglist[i + 1]);
             i++;
         }
         else if (wcscmp(szArglist[i], L"-c") == 0
             || wcscmp(szArglist[i], L"-change") == 0)
         {
-            display_time_seconds = _wtoi(szArglist[i + 1]);
+            DISPLAY_TIME_SECOND = _wtoi(szArglist[i + 1]);
             i++;
         }
         ///////////////////////////////////////////////////////////////////////////////
@@ -422,6 +467,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                 << "EX: StreamViewerAI2.exe -l cams.txt -x yolov5s.onnx -n coco.names" << std::endl
                 << "=======================================" << std::endl
                 << "オプション" << std::endl
+                << "-i, -ini 設定ファイル" << std::endl
                 << "-s,-stream AI処理なし" << std::endl
                 << "-y,-yolo 物体認識(YOLO)" << std::endl
                 << "-p,-pose 姿勢認識(PoseNet)'" << std::endl
@@ -454,8 +500,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         _str_usage << url_file << std::endl
             << onnx_file << std::endl
             << names_file << std::endl
-            <<"sleep[msec]: " << fram_interval_ms << std::endl
-            <<"flamerate[fps]: "<< display_time_seconds << std::endl;
+            <<"sleep[msec]: " << FRAME_INTERVAL_MS << std::endl
+            <<"flamerate[fps]: "<< DISPLAY_TIME_SECOND << std::endl;
         std::string _tmp = _str_usage.str();
         CA2W wStr(_tmp.c_str());
         int msgboxID = MessageBox(NULL, wStr, L"cxxopts", MB_ICONWARNING | MB_OK);
@@ -472,29 +518,40 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     }
     if (!std::filesystem::exists(onnx_file))
     {
-        CA2W wStr(onnx_file.c_str());
-        int msgboxID = MessageBox(NULL, wStr, (LPCWSTR)L"ONNXファイルがありません", MB_ICONWARNING | MB_OK);
-        return 0;
+        std::string _msgstr = "ONNXファイルがありません。\n物体認識AIの動作に必要なファイルです。AIを停止して起動します。\nメニューからonnxファイルを指定してから、AIメニューでAIを起動してください。\n\n見つからないファイル\n" + onnx_file;
+        CA2W wStr(_msgstr.c_str());
+        int msgboxID = MessageBox(NULL, wStr, L"ファイルが見つかりません",MB_ICONWARNING | MB_OK);
+        //CA2W wStr(onnx_file.c_str());
+        //int msgboxID = MessageBox(NULL, wStr, (LPCWSTR)L"ONNXファイルがありません。\nストーリミング受信モードで起動します。", MB_ICONWARNING | MB_OK);
+        DrawCycleMode = DRAWCYCLE_STREAM;
+        //return 0;
     }
     if (!std::filesystem::exists(names_file))
     {
-        CA2W wStr(names_file.c_str());
-        int msgboxID = MessageBox(NULL, wStr, (LPCWSTR)L"NAMESファイルがありません", MB_ICONWARNING | MB_OK);
-        return 0;
+        std::string _msgstr = "namesファイルがありません。\n物体認識AIの動作に必要なファイルです。AIを停止して起動します。\nメニューからonnxファイルを指定してから、AIメニューでAIを起動してください。\n\n見つからないファイル\n" + names_file;
+        CA2W wStr(_msgstr.c_str());
+        int msgboxID = MessageBox(NULL, wStr, L"ファイルが見つかりません", MB_ICONWARNING | MB_OK);
+
+        //CA2W wStr(names_file.c_str());
+        //int msgboxID = MessageBox(NULL, wStr, (LPCWSTR)L"NAMESファイルがありません。\nストーリミング受信モードで起動します。", MB_ICONWARNING | MB_OK);
+        //return 0;
+        DrawCycleMode = DRAWCYCLE_STREAM;
     }
 
+    open_ai_csv_file();
+
     // グローバル文字列を初期化する
-    LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
-    LoadStringW(hInstance, IDC_STREAMVIERWER, szWindowClass, MAX_LOADSTRING);
-    MyRegisterClass(hInstance);
+    LoadStringW(_hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
+    LoadStringW(_hInstance, IDC_STREAMVIERWER, szWindowClass, MAX_LOADSTRING);
+    MyRegisterClass(_hInstance);
 
     // アプリケーション初期化の実行:
-    if (!InitInstance (hInstance, nCmdShow))
+    if (!InitInstance (_hInstance, nCmdShow))
     {
         return FALSE;
     }
 
-    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_STREAMVIERWER));
+    HACCEL hAccelTable = LoadAccelerators(_hInstance, MAKEINTRESOURCE(IDC_STREAMVIERWER));
 
     MSG msg;
 
@@ -507,9 +564,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             DispatchMessage(&msg);
         }
     }
-
-    pAICSV->close();
-
+    
+    //デストラクタを確実に動作させるためのブロック
+    {
+        std::lock_guard<std::mutex> lock(FILE_MUTEX);
+        if (pAICSV != nullptr)
+        {
+            pAICSV->close();
+        }
+    }
     return (int) msg.wParam;
 }
 //
@@ -517,7 +580,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 //
 //  目的: ウィンドウ クラスを登録します。
 //
-ATOM MyRegisterClass(HINSTANCE hInstance)
+ATOM MyRegisterClass(HINSTANCE _hInstance)
 {
     WNDCLASSEXW wcex;
 
@@ -527,8 +590,8 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     wcex.lpfnWndProc    = WndProc;
     wcex.cbClsExtra     = 0;
     wcex.cbWndExtra     = 0;
-    wcex.hInstance      = hInstance;
-    wcex.hIcon          = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_STREAMVIERWER));
+    wcex.hInstance      = _hInstance;
+    wcex.hIcon          = LoadIcon(_hInstance, MAKEINTRESOURCE(IDI_STREAMVIERWER));
     wcex.hCursor        = LoadCursor(nullptr, IDC_ARROW);
     wcex.hbrBackground  = (HBRUSH)(COLOR_WINDOW+1);
     wcex.lpszMenuName   = MAKEINTRESOURCEW(IDC_STREAMVIERWER);
@@ -548,12 +611,12 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 //        この関数で、グローバル変数でインスタンス ハンドルを保存し、
 //        メイン プログラム ウィンドウを作成および表示します。
 //
-BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
+BOOL InitInstance(HINSTANCE _hInstance, int nCmdShow)
 {
-   hInst = hInstance; // グローバル変数にインスタンス ハンドルを格納する
+   hInst = _hInstance; // グローバル変数にインスタンス ハンドルを格納する
 
    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, _hInstance, nullptr);
 
    if (!hWnd)
    {
@@ -592,12 +655,7 @@ int select_file(HWND hWnd, std::string& _file_path, LPCWSTR _file_pattern)
         // ファイルが選択されたときの処理
         if (std::filesystem::exists(ofn.lpstrFile))
         {
-            //int msgboxID = MessageBox(NULL, ofn.lpstrFile, (LPCWSTR)L"ファイルがありました", MB_ICONWARNING | MB_OK);
             _file_path = wstring2string(ofn.lpstrFile);
-            //UpdateWindow(hWnd);
-            //ShowWindow(hWnd, SW_SHOW);
-            //InvalidateRect(hWnd, NULL, TRUE);
-            //DefWindowProc(hWnd, message, wParam, lParam);
             return 1;
         }
         else
@@ -639,14 +697,14 @@ int PROC_STOP()
     set_cvw_stop(true);
     
     //ビデオキャプチャークラスを閉じる
-    while (Count_VideoCapture > 0)
+    while (COUNT_VIDEOCAPTURE > 0)
     {
         //DoEvents();
         Sleep(100);
     }
     //ビデオライタークラスを閉じる
-    mvw_org.release();
-    mvw_ai.release();
+    mlVIDEOWRITERORG.release();
+    mlVIDEOWRITERAI.release();
     
     for (int i = 0; i < VIEWMAX; i++)
     {
@@ -673,12 +731,13 @@ int PROC_STOP()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//
+// ① newで新しいyoloオブジェクトを生成
+// ② パラメータに値をセット
 int load_YoloObjectDetection(int _load)
 {
     if (_load == AI_LOAD)
     {
-        pt_YoloObjectDetection = new YoloObjectDetection;
+        ptYoloOBJECTDECTECTION = new YoloObjectDetection;
         YoloAIParametors yp;
         if (DrawCycleMode == DRAWCYCLE_YOLO8)
         {
@@ -698,14 +757,15 @@ int load_YoloObjectDetection(int _load)
         yp.score_threshold = (float)DEFAULT_SCORE_THRESHOLD;
         yp.nms_threshold = (float)DEFAULT_NMS_THRESHOLD;
         yp.confidence_thresgold = (float)DEFAULT_CONF_THRESHOLD;
-        _ai_running = pt_YoloObjectDetection->init_yolov5(yp, true, false);
+        yp.GPU_Number = GPU_Number;
+        _ai_running = ptYoloOBJECTDECTECTION->init_object_detection(yp, true, false);
     }
     else if (_load == AI_UNLOAD)
     {
-        if (pt_YoloObjectDetection != nullptr)
+        if (ptYoloOBJECTDECTECTION != nullptr)
         {
-            delete pt_YoloObjectDetection;
-            pt_YoloObjectDetection = nullptr;
+            delete ptYoloOBJECTDECTECTION;
+            ptYoloOBJECTDECTECTION = nullptr;
         }
     }
     return 0;
@@ -715,15 +775,15 @@ int load_PoseNet(int _load)
 {
     if (_load == AI_LOAD)
     {
-        _ptg_posenet = new PoseNet;
-        _ptg_posenet->init(poseproto, poseweight, USE_GPU);
+        ptPOSENET = new PoseNet;
+        ptPOSENET->init(poseproto, poseweight, USE_GPU);
     }
     else if(_load==AI_UNLOAD)
     { 
-        if (_ptg_posenet != nullptr)
+        if (ptPOSENET != nullptr)
         {
-            delete _ptg_posenet;
-            _ptg_posenet = nullptr;
+            delete ptPOSENET;
+            ptPOSENET = nullptr;
         }
     }
     return 0;
@@ -738,7 +798,7 @@ BOOL set_menu_string(HWND hWnd, UINT _idm, LPCSTR _org_str, std::string& _add_st
         << "("
         << _add_str.c_str()
         << ")" << std::ends;
-    std::wstring _menu_str = stringToWstring(_menu_wsstr.str());
+    std::wstring _menu_str = string2wstring(_menu_wsstr.str());
    
     return ModifyMenu(GetMenu(hWnd), _idm, MF_STRING, _idm, (LPCWSTR)_menu_str.c_str());
 
@@ -830,19 +890,19 @@ int STHM(HWND hWnd)
     CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_090, MF_UNCHECKED);
     CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_100, MF_UNCHECKED);
 
-    if (pt_YoloObjectDetection != nullptr)
+    if (ptYoloOBJECTDECTECTION != nullptr)
     {
-        if (pt_YoloObjectDetection->YP.score_threshold == 0.001f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_000, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.score_threshold == 0.1f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_010, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.score_threshold == 0.2f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_020, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.score_threshold == 0.3f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_030, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.score_threshold == 0.4f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_040, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.score_threshold == 0.5f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_050, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.score_threshold == 0.6f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_060, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.score_threshold == 0.7f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_070, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.score_threshold == 0.8f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_080, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.score_threshold == 0.9f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_090, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.score_threshold == 1.0f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_100, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 0.001f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_000, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 0.1f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_010, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 0.2f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_020, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 0.3f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_030, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 0.4f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_040, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 0.5f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_050, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 0.6f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_060, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 0.7f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_070, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 0.8f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_080, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 0.9f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_090, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.score_threshold == 1.0f)CheckMenuItem(hMenu, IDM_AI_SCORE_THRESHOLD_100, MF_CHECKED);
     }
     DrawMenuBar(hWnd);
     return 0;
@@ -865,19 +925,19 @@ int SNHM(HWND hWnd)
     CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_090, MF_UNCHECKED);
     CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_100, MF_UNCHECKED);
 
-    if (pt_YoloObjectDetection != nullptr)
+    if (ptYoloOBJECTDECTECTION != nullptr)
     {
-        if (pt_YoloObjectDetection->YP.nms_threshold == 0.1f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_000, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.nms_threshold == 0.1f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_010, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.nms_threshold == 0.2f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_020, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.nms_threshold == 0.3f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_030, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.nms_threshold == 0.4f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_040, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.nms_threshold == 0.5f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_050, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.nms_threshold == 0.6f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_060, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.nms_threshold == 0.7f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_070, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.nms_threshold == 0.8f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_080, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.nms_threshold == 0.9f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_090, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.nms_threshold == 1.0f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_100, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 0.1f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_000, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 0.1f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_010, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 0.2f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_020, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 0.3f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_030, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 0.4f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_040, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 0.5f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_050, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 0.6f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_060, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 0.7f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_070, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 0.8f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_080, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 0.9f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_090, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.nms_threshold == 1.0f)CheckMenuItem(hMenu, IDM_AI_NMS_THRESHOLD_100, MF_CHECKED);
     }
 
     DrawMenuBar(hWnd);
@@ -901,19 +961,19 @@ int SCHM(HWND hWnd)
     CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_090, MF_UNCHECKED);
     CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_100, MF_UNCHECKED);
 
-    if (pt_YoloObjectDetection != nullptr)
+    if (ptYoloOBJECTDECTECTION != nullptr)
     {
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.001f)CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_000, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.1f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_010, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.2f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_020, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.3f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_030, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.4f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_040, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.5f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_050, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.6f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_060, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.7f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_070, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.8f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_080, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 0.9f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_090, MF_CHECKED);
-        if (pt_YoloObjectDetection->YP.confidence_thresgold == 1.0f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_100, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 0.001f)CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_000, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 0.1f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_010, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 0.2f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_020, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 0.3f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_030, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 0.4f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_040, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 0.5f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_050, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 0.6f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_060, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 0.7f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_070, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 0.8f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_080, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 0.9f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_090, MF_CHECKED);
+        if (ptYoloOBJECTDECTECTION->YP.confidence_thresgold == 1.0f  )CheckMenuItem(hMenu, IDM_AI_CONF_THRESHOLD_100, MF_CHECKED);
     }
 
     DrawMenuBar(hWnd);
@@ -996,9 +1056,9 @@ int set_camera_menu(HWND hWnd,T_CAM_URLS& _cam_urls)
 
         std::wstringstream _menu_strstream;
         _menu_strstream << "(&"<< _shortcut_key_number <<")";
-        _menu_strstream << stringToWstring(_cam_urls[_count][0].c_str());
+        _menu_strstream << string2wstring(_cam_urls[_count][0].c_str());
         _menu_strstream << L" (";
-        _menu_strstream << stringToWstring(_cam_urls[_count][1].c_str());
+        _menu_strstream << string2wstring(_cam_urls[_count][1].c_str());
         _menu_strstream << L")";
         //_menu_strstream << L" "<< _count + IDM_CAM_001; //ID番号の表示
         std::wstring _menu_str = _menu_strstream.str();
@@ -1245,7 +1305,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 {
                     appmode = APPMODE_MOVFILE;
                     PROC_START(hWnd);
-                    cvw_file_end = false;
+                    CVW_FILE_END = false;
                 }
                 else
                     appmode = APPMODE_NETCAM;
@@ -1265,8 +1325,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     PROC_STOP();
                     //YoloAIParametors yp;
                     //yp._onnx_file_name = onnx_file.c_str();
-                    if(pt_YoloObjectDetection!=nullptr)
-                        pt_YoloObjectDetection->YP.onnx_file_name = onnx_file;
+                    if(ptYoloOBJECTDECTECTION!=nullptr)
+                        ptYoloOBJECTDECTECTION->YP.onnx_file_name = onnx_file;
                     set_file_menu_items(hWnd);
                     PROC_START(hWnd);
                 }
@@ -1281,8 +1341,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     PROC_STOP();
                     //YoloAIParametors yp;
                     //yp._onnx_file_name = onnx_file.c_str();
-                    if (pt_YoloObjectDetection != nullptr)
-                        pt_YoloObjectDetection->YP.onnx_file_name = onnx_file8;
+                    if (ptYoloOBJECTDECTECTION != nullptr)
+                        ptYoloOBJECTDECTECTION->YP.onnx_file_name = onnx_file8;
                     set_file_menu_items(hWnd);
                     PROC_START(hWnd);
                 }
@@ -1301,25 +1361,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 break;
 
             case IDM_VIDEOREC_VGA:
-                mvw_org.width = 720;
-                mvw_org.height = 480;
-                mvw_ai.width = 720;
-                mvw_ai.height = 480;
-                mvw_org.open(add_dt_ext(MP4PATH + MP4VHA, MP4EXT).c_str());
-                mvw_ai.open(add_dt_ext(MP4PATH + MP4VHAAI, MP4EXT).c_str());
+                mlVIDEOWRITERORG.width = 720;
+                mlVIDEOWRITERORG.height = 480;
+                mlVIDEOWRITERAI.width = 720;
+                mlVIDEOWRITERAI.height = 480;
+                mlVIDEOWRITERORG.open(add_dt_ext(MP4PATH + MP4VHA, MP4EXT).c_str());
+                mlVIDEOWRITERAI.open(add_dt_ext(MP4PATH + MP4VHAAI, MP4EXT).c_str());
 
                 break;
             case IDM_VIDEOREC_HD:
-                mvw_org.width = 1920;
-                mvw_org.height = 1080;
-                mvw_ai.width = 1920;
-                mvw_ai.height = 1080;
-                mvw_org.open(add_dt_ext(MP4PATH + MP4HD, MP4EXT).c_str());
-                mvw_ai.open(add_dt_ext(MP4PATH + MP4HDAI, MP4EXT).c_str());
+                mlVIDEOWRITERORG.width = 1920;
+                mlVIDEOWRITERORG.height = 1080;
+                mlVIDEOWRITERAI.width = 1920;
+                mlVIDEOWRITERAI.height = 1080;
+                mlVIDEOWRITERORG.open(add_dt_ext(MP4PATH + MP4HD, MP4EXT).c_str());
+                mlVIDEOWRITERAI.open(add_dt_ext(MP4PATH + MP4HDAI, MP4EXT).c_str());
                 break;
             case IDM_VIDEOREC_END:
-                mvw_org.release();
-                mvw_ai.release();
+                mlVIDEOWRITERORG.release();
+                mlVIDEOWRITERAI.release();
                 break;
 
             case IDM_C_000:set_display_time_seconds(  0); DTSM(hWnd); break;
@@ -1333,6 +1393,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             case IDM_C_300:set_display_time_seconds(300); DTSM(hWnd); break;
             case IDM_C_600:set_display_time_seconds(600); DTSM(hWnd); break;
 
+            case IDM_F_60SEC:set_frame_between_time(60000); FBTM(hWnd); break;
+            case IDM_F_30SEC:set_frame_between_time(30000); FBTM(hWnd); break;
+            case IDM_F_10SEC:set_frame_between_time(10000); FBTM(hWnd); break;
             case IDM_F_0003:set_frame_between_time(3000); FBTM(hWnd); break;
             case IDM_F_0005:set_frame_between_time(2000); FBTM(hWnd); break;
             case IDM_F_0008:set_frame_between_time(1500); FBTM(hWnd); break;
@@ -1344,41 +1407,41 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             case IDM_F_0600:set_frame_between_time(16  ); FBTM(hWnd); break;
             case IDM_F_1200:set_frame_between_time(8   ); FBTM(hWnd); break;
 
-            case IDM_AI_SCORE_THRESHOLD_000:set_score_threshold(0.001f, pt_YoloObjectDetection); STHM(hWnd); break;
-            case IDM_AI_SCORE_THRESHOLD_010:set_score_threshold(0.1f  , pt_YoloObjectDetection); STHM(hWnd); break;
-            case IDM_AI_SCORE_THRESHOLD_020:set_score_threshold(0.2f  , pt_YoloObjectDetection); STHM(hWnd); break;
-            case IDM_AI_SCORE_THRESHOLD_030:set_score_threshold(0.3f  , pt_YoloObjectDetection); STHM(hWnd); break;
-            case IDM_AI_SCORE_THRESHOLD_040:set_score_threshold(0.4f  , pt_YoloObjectDetection); STHM(hWnd); break;
-            case IDM_AI_SCORE_THRESHOLD_050:set_score_threshold(0.5f  , pt_YoloObjectDetection); STHM(hWnd); break;
-            case IDM_AI_SCORE_THRESHOLD_060:set_score_threshold(0.6f  , pt_YoloObjectDetection); STHM(hWnd); break;
-            case IDM_AI_SCORE_THRESHOLD_070:set_score_threshold(0.7f  , pt_YoloObjectDetection); STHM(hWnd); break;
-            case IDM_AI_SCORE_THRESHOLD_080:set_score_threshold(0.8f  , pt_YoloObjectDetection); STHM(hWnd); break;
-            case IDM_AI_SCORE_THRESHOLD_090:set_score_threshold(0.9f  , pt_YoloObjectDetection); STHM(hWnd); break;
-            case IDM_AI_SCORE_THRESHOLD_100:set_score_threshold(1.0f  , pt_YoloObjectDetection); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_000:set_score_threshold(0.001f, ptYoloOBJECTDECTECTION); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_010:set_score_threshold(0.1f  , ptYoloOBJECTDECTECTION); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_020:set_score_threshold(0.2f  , ptYoloOBJECTDECTECTION); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_030:set_score_threshold(0.3f  , ptYoloOBJECTDECTECTION); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_040:set_score_threshold(0.4f  , ptYoloOBJECTDECTECTION); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_050:set_score_threshold(0.5f  , ptYoloOBJECTDECTECTION); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_060:set_score_threshold(0.6f  , ptYoloOBJECTDECTECTION); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_070:set_score_threshold(0.7f  , ptYoloOBJECTDECTECTION); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_080:set_score_threshold(0.8f  , ptYoloOBJECTDECTECTION); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_090:set_score_threshold(0.9f  , ptYoloOBJECTDECTECTION); STHM(hWnd); break;
+            case IDM_AI_SCORE_THRESHOLD_100:set_score_threshold(1.0f  , ptYoloOBJECTDECTECTION); STHM(hWnd); break;
 
-            case IDM_AI_NMS_THRESHOLD_000:set_nms_threshold(0.0f, pt_YoloObjectDetection); SNHM(hWnd); break;
-            case IDM_AI_NMS_THRESHOLD_010:set_nms_threshold(0.1f, pt_YoloObjectDetection); SNHM(hWnd); break;
-            case IDM_AI_NMS_THRESHOLD_020:set_nms_threshold(0.2f, pt_YoloObjectDetection); SNHM(hWnd); break;
-            case IDM_AI_NMS_THRESHOLD_030:set_nms_threshold(0.3f, pt_YoloObjectDetection); SNHM(hWnd); break;
-            case IDM_AI_NMS_THRESHOLD_040:set_nms_threshold(0.4f, pt_YoloObjectDetection); SNHM(hWnd); break;
-            case IDM_AI_NMS_THRESHOLD_050:set_nms_threshold(0.5f, pt_YoloObjectDetection); SNHM(hWnd); break;
-            case IDM_AI_NMS_THRESHOLD_060:set_nms_threshold(0.6f, pt_YoloObjectDetection); SNHM(hWnd); break;
-            case IDM_AI_NMS_THRESHOLD_070:set_nms_threshold(0.7f, pt_YoloObjectDetection); SNHM(hWnd); break;
-            case IDM_AI_NMS_THRESHOLD_080:set_nms_threshold(0.8f, pt_YoloObjectDetection); SNHM(hWnd); break;
-            case IDM_AI_NMS_THRESHOLD_090:set_nms_threshold(0.9f, pt_YoloObjectDetection); SNHM(hWnd); break;
-            case IDM_AI_NMS_THRESHOLD_100:set_nms_threshold(1.0f, pt_YoloObjectDetection); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_000:set_nms_threshold(0.0f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_010:set_nms_threshold(0.1f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_020:set_nms_threshold(0.2f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_030:set_nms_threshold(0.3f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_040:set_nms_threshold(0.4f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_050:set_nms_threshold(0.5f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_060:set_nms_threshold(0.6f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_070:set_nms_threshold(0.7f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_080:set_nms_threshold(0.8f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_090:set_nms_threshold(0.9f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
+            case IDM_AI_NMS_THRESHOLD_100:set_nms_threshold(1.0f, ptYoloOBJECTDECTECTION); SNHM(hWnd); break;
 
-            case IDM_AI_CONF_THRESHOLD_000:set_conf_threshold(0.001f, pt_YoloObjectDetection); SCHM(hWnd); break;
-            case IDM_AI_CONF_THRESHOLD_010:set_conf_threshold(0.1f  , pt_YoloObjectDetection); SCHM(hWnd); break;
-            case IDM_AI_CONF_THRESHOLD_020:set_conf_threshold(0.2f  , pt_YoloObjectDetection); SCHM(hWnd); break;
-            case IDM_AI_CONF_THRESHOLD_030:set_conf_threshold(0.3f  , pt_YoloObjectDetection); SCHM(hWnd); break;
-            case IDM_AI_CONF_THRESHOLD_040:set_conf_threshold(0.4f  , pt_YoloObjectDetection); SCHM(hWnd); break;
-            case IDM_AI_CONF_THRESHOLD_050:set_conf_threshold(0.5f  , pt_YoloObjectDetection); SCHM(hWnd); break;
-            case IDM_AI_CONF_THRESHOLD_060:set_conf_threshold(0.6f  , pt_YoloObjectDetection); SCHM(hWnd); break;
-            case IDM_AI_CONF_THRESHOLD_070:set_conf_threshold(0.7f  , pt_YoloObjectDetection); SCHM(hWnd); break;
-            case IDM_AI_CONF_THRESHOLD_080:set_conf_threshold(0.8f  , pt_YoloObjectDetection); SCHM(hWnd); break;
-            case IDM_AI_CONF_THRESHOLD_090:set_conf_threshold(0.9f  , pt_YoloObjectDetection); SCHM(hWnd); break;
-            case IDM_AI_CONF_THRESHOLD_100:set_conf_threshold(1.0f  , pt_YoloObjectDetection); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_000:set_conf_threshold(0.001f, ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_010:set_conf_threshold(0.1f  , ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_020:set_conf_threshold(0.2f  , ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_030:set_conf_threshold(0.3f  , ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_040:set_conf_threshold(0.4f  , ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_050:set_conf_threshold(0.5f  , ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_060:set_conf_threshold(0.6f  , ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_070:set_conf_threshold(0.7f  , ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_080:set_conf_threshold(0.8f  , ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_090:set_conf_threshold(0.9f  , ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
+            case IDM_AI_CONF_THRESHOLD_100:set_conf_threshold(1.0f  , ptYoloOBJECTDECTECTION); SCHM(hWnd); break;
 
             case IDM_CAM_001: view_single_cam(hWnd, 1); break;
             case IDM_CAM_002: view_single_cam(hWnd, 2); break;
@@ -1482,25 +1545,26 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             case IDM_CAM_100: view_single_cam(hWnd, 100); break;
 
                 
-                //テキストを表示
+            //テキストを表示 現在は機能をoff
             case IDM_TEXTOUTPUT:
             {
-                if (ai_text_output)
-                    ai_text_output = false;
+                if (AI_TEXT_OUTPUT)
+                    AI_TEXT_OUTPUT = false;
                 else
                 {
-                    ai_text_output = true;
-/*
-                    hEdit = CreateWindowEx(
-                        WS_EX_CLIENTEDGE,
-                        L"EDIT",
-                        L"",
-                        WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL,
-                        10, 10, 500, 300,
-                        hWnd,
-                        (HMENU)IDC_TEXTWINDOW,
-                        GetModuleHandle(NULL),
-                        NULL);
+                    AI_TEXT_OUTPUT = true;
+                    if (0) // テキストを表示 現在は機能をoff
+                    {
+                        hEdit = CreateWindowEx(
+                            WS_EX_CLIENTEDGE,
+                            L"EDIT",
+                            L"",
+                            WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | ES_LEFT | ES_MULTILINE | ES_AUTOVSCROLL,
+                            10, 10, 500, 300,
+                            hWnd,
+                            (HMENU)IDC_TEXTWINDOW,
+                            GetModuleHandle(NULL),
+                            NULL);
 
                         // エディットコントロールのテキストと背景色を設定
                         //HDC _hdc = GetDC(hEdit);
@@ -1517,19 +1581,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         ShowWindow(hWnd, SW_SHOW);
                         UpdateWindow(hWnd);
 
-                    if (hEdit == NULL) {
-                        MessageBox(hWnd, L"Could not create edit box.", L"Error", MB_OK | MB_ICONERROR);
-                    }
-                    else {
-                        // テキストボックスにテキストを設定
-                        std::string text = "0123456789abcdefghijklmnopqrstuvwxyz\n";
-                        std::string repeatedText;
-                        for (int i = 0; i < 10; ++i) {
-                            repeatedText += text;
+                        if (hEdit == NULL) {
+                            MessageBox(hWnd, L"Could not create edit box.", L"Error", MB_OK | MB_ICONERROR);
                         }
-                        SetWindowText(hEdit, _A2CW(repeatedText.c_str()));
+                        else {
+                            // テキストボックスにテキストを設定
+                            std::string text = "0123456789abcdefghijklmnopqrstuvwxyz\n";
+                            std::string repeatedText;
+                            for (int i = 0; i < 10; ++i) {
+                                repeatedText += text;
+                            }
+                            //SetWindowText(hEdit, string2wstring(repeatedText.c_str()));
+                            SetWindowText(hEdit, string2wstring(repeatedText).c_str());
+                        }
                     }
-  */
                 }
             }
             break;
@@ -1539,19 +1604,28 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 
             case IDM_MULTIMONITOR_1:
                 set_fullscreen(hWnd, 0);
+                WINDOW_MAX = 3;
+                isFULLSCREEN = true;
                 break;
             case IDM_MULTIMONITOR_2:
                 set_fullscreen(hWnd,1);
+                WINDOW_MAX = 4;
+                isFULLSCREEN = true;
                 break;
             case IDM_MULTIMONITOR_3:
                 set_fullscreen(hWnd, 2);
+                WINDOW_MAX = 5;
+                isFULLSCREEN = true;
                 break;
             case IDM_MULTIMONITOR_4:
                 set_fullscreen(hWnd, 3);
+                WINDOW_MAX = 6;
+                isFULLSCREEN = true;
                 break;
             case IDM_MULTIMONITOR_1M:
                 ToggleFullscreenWithMenu(hWnd);
-                isFullscreen = true;
+                WINDOW_MAX = 2;
+                isFULLSCREEN = true;
                 break;
             default:
                 return DefWindowProc(hWnd, message, wParam, lParam);
@@ -1565,7 +1639,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         //winmainの最初の方に移動
         if(0)
-            read_write_file(INIFILE, RWFILE_READ);
+            read_write_file(init_file, RWFILE_READ);
         //カメラリストを読み込む       
         cam_urls = readRecordsFromFile(url_file);
 
@@ -1604,8 +1678,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         SNHM(hWnd);
         SCHM(hWnd);
 
-        if(WINDOW_MAX)
-            ShowWindow(hWnd, SW_MAXIMIZE); // ウィンドウを最大化
+        if(WINDOW_MAX==1)           ShowWindow(hWnd, SW_MAXIMIZE); // ウィンドウを最大化
+        else if (WINDOW_MAX == 2) { ToggleFullscreenWithMenu(hWnd); isFULLSCREEN = true; }
+        else if (WINDOW_MAX == 3)   set_fullscreen(hWnd, 0);
+        else if (WINDOW_MAX == 4)   set_fullscreen(hWnd, 1);
+        else if (WINDOW_MAX == 5)   set_fullscreen(hWnd, 2);
+        else if (WINDOW_MAX == 6)   set_fullscreen(hWnd, 3);
+
         // ブラシの作成（背景色を黒に設定）
         hbrBlackBrush = CreateSolidBrush(RGB(0, 0, 0));
     }
@@ -1613,17 +1692,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     //ダブルクリック 全画面<=>ウィンドウ
     case WM_LBUTTONDBLCLK:
     {
-        if (isFullscreen) 
+        if (isFULLSCREEN) 
         {
-            isFullscreen = false;
-            //isFullscreen = !isFullscreen;
+            WINDOW_MAX = 0;
+            isFULLSCREEN = false;
+            //isFULLSCREEN = !isFULLSCREEN;
             set_cvw_stop(false);
             // ウィンドウを元のサイズと位置に戻す
             ResumeWindow(hWnd);
 
             //SetWindowLong(hWnd, GWL_STYLE, WS_OVERLAPPEDWINDOW);
-            //SetWindowPos(hWnd, HWND_TOP, windowRect.left, windowRect.top, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top, SWP_FRAMECHANGED);
-            //SetMenu(hWnd, hMenu_for_fullscreen);
+            //SetWindowPos(hWnd, HWND_TOP, mlWINDOWRECT.left, mlWINDOWRECT.top, mlWINDOWRECT.right - mlWINDOWRECT.left, mlWINDOWRECT.bottom - mlWINDOWRECT.top, SWP_FRAMECHANGED);
+            //SetMenu(hWnd, hMENU_FOR_FULLSCRENN);
             //ShowWindow(hWnd, SW_SHOW);
             //InvalidateRect(hWnd, NULL, TRUE);
         }
@@ -1656,7 +1736,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         if (wParam == VK_SPACE)
         {
             //MessageBox(hWnd, L"スペースキーが押されました", L"キーイベント", MB_OK);
-            Next_source = true;
+            NEXT_SOURCE = true;
         }
         break;
             
@@ -1665,12 +1745,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_ENTERSIZEMOVE:
     //case WM_SIZING:
         // 画面の端をドラッグしたときに WM_PAINT イベントを抑制
-        bSuppressPaint = true;
+        bSUPPRESS_PAINT = true;
         DefWindowProc(hWnd, message, wParam, lParam);
         break;
     case WM_EXITSIZEMOVE:
     //case WM_SIZE:
-        bSuppressPaint = false;
+        bSUPPRESS_PAINT = false;
 
         DefWindowProc(hWnd, message, wParam, lParam);
         break;
@@ -1680,19 +1760,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_PAINT:
     {
         //描画中 処理が重複・輻輳しないよう、はじく
-        if (wm_paint_now)
+        if (WM_PAINT_NOW)
         {
             break;
         }
         //画面サイズ変更をしている時の処理
-        else if (bSuppressPaint)
+        else if (bSUPPRESS_PAINT)
         {
             if (0)
                 PROC_STOP();
         }
         else
         {   
-            wm_paint_now = true;
+            WM_PAINT_NOW = true;
             //とりあえず黒く塗る
             PAINTSTRUCT ps;
             HDC hDC = BeginPaint(hWnd, &ps);
@@ -1718,10 +1798,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                             hDC,
                             DrawArea(1,1,0,0),
                             true,
-                            pt_YoloObjectDetection,
-                            _ptg_posenet,
-                            cam_urls,
-                            pAICSV
+                            ptYoloOBJECTDECTECTION,
+                            ptPOSENET,
+                            cam_urls
+                            //pAICSV
                         );
                     }
                 }
@@ -1730,69 +1810,69 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 {
                     //std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoFour(cam_urls);
                     std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls,4);
-                    if (main_th[0] == nullptr) main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 0, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[0], pAICSV);
-                    if (main_th[1] == nullptr) main_th[1] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 1, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[1], pAICSV);
-                    if (main_th[2] == nullptr) main_th[2] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 0, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[2], pAICSV);
-                    if (main_th[3] == nullptr) main_th[3] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 1, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[3], pAICSV);
+                    if (main_th[0] == nullptr) main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 0, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[0]);
+                    if (main_th[1] == nullptr) main_th[1] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 1, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[1]);
+                    if (main_th[2] == nullptr) main_th[2] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 0, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[2]);
+                    if (main_th[3] == nullptr) main_th[3] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(2, 2, 1, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[3]);
                 }
                 else if (ViewMode == IDM_VIEW_6)//Mode4View==true
                 {
                     std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls, 6);
-                    if (main_th[0] == nullptr) main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 0, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[0], pAICSV);
-                    if (main_th[1] == nullptr) main_th[1] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 0, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[1], pAICSV);
-                    if (main_th[2] == nullptr) main_th[2] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 1, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[2], pAICSV);
-                    if (main_th[3] == nullptr) main_th[3] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 1, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[3], pAICSV);
-                    if (main_th[4] == nullptr) main_th[4] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 2, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[4], pAICSV);
-                    if (main_th[5] == nullptr) main_th[5] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 2, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[5], pAICSV);
+                    if (main_th[0] == nullptr) main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 0, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[0]);
+                    if (main_th[1] == nullptr) main_th[1] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 0, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[1]);
+                    if (main_th[2] == nullptr) main_th[2] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 1, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[2]);
+                    if (main_th[3] == nullptr) main_th[3] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 1, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[3]);
+                    if (main_th[4] == nullptr) main_th[4] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 2, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[4]);
+                    if (main_th[5] == nullptr) main_th[5] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 2, 2, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[5]);
                 }
                 else if (ViewMode == IDM_VIEW_9)//Mode4View==true
                 {
                     std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls, 9);
-                    if (main_th[0] == nullptr) main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 0, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[0], pAICSV);
-                    if (main_th[1] == nullptr) main_th[1] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 1, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[1], pAICSV);
-                    if (main_th[2] == nullptr) main_th[2] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 2, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[2], pAICSV);
-                    if (main_th[3] == nullptr) main_th[3] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 0, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[3], pAICSV);
-                    if (main_th[4] == nullptr) main_th[4] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 1, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[4], pAICSV);
-                    if (main_th[5] == nullptr) main_th[5] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 2, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[5], pAICSV);
-                    if (main_th[6] == nullptr) main_th[6] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 0, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[6], pAICSV);
-                    if (main_th[7] == nullptr) main_th[7] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 1, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[7], pAICSV);
-                    if (main_th[8] == nullptr) main_th[8] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 2, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[8], pAICSV);
+                    if (main_th[0] == nullptr) main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 0, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[0]);
+                    if (main_th[1] == nullptr) main_th[1] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 1, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[1]);
+                    if (main_th[2] == nullptr) main_th[2] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 2, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[2]);
+                    if (main_th[3] == nullptr) main_th[3] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 0, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[3]);
+                    if (main_th[4] == nullptr) main_th[4] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 1, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[4]);
+                    if (main_th[5] == nullptr) main_th[5] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 2, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[5]);
+                    if (main_th[6] == nullptr) main_th[6] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 0, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[6]);
+                    if (main_th[7] == nullptr) main_th[7] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 1, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[7]);
+                    if (main_th[8] == nullptr) main_th[8] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(3, 3, 2, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[8]);
                 }
                 else if (ViewMode == IDM_VIEW_12)//Mode4View==true
                 {
                     std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls, 12);
-                    if (main_th[0] == nullptr)  main_th[0] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 0, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[0], pAICSV);
-                    if (main_th[1] == nullptr)  main_th[1]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 0, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[1], pAICSV);
-                    if (main_th[2] == nullptr)  main_th[2]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 0, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[2], pAICSV);
-                    if (main_th[3] == nullptr)  main_th[3]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 1, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[3], pAICSV);
-                    if (main_th[4] == nullptr)  main_th[4]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 1, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[4], pAICSV);
-                    if (main_th[5] == nullptr)  main_th[5]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 1, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[5], pAICSV);
-                    if (main_th[6] == nullptr)  main_th[6]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 2, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[6], pAICSV);
-                    if (main_th[7] == nullptr)  main_th[7]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 2, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[7], pAICSV);
-                    if (main_th[8] == nullptr)  main_th[8]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 2, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[8], pAICSV);
-                    if (main_th[9] == nullptr)  main_th[9]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 3, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[9], pAICSV);
-                    if (main_th[10] == nullptr) main_th[10] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 3, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[10], pAICSV);
-                    if (main_th[11] == nullptr) main_th[11] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 3, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[11], pAICSV);
+                    if (main_th[0] == nullptr)  main_th[0]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 0, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[0]);
+                    if (main_th[1] == nullptr)  main_th[1]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 0, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[1]);
+                    if (main_th[2] == nullptr)  main_th[2]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 0, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[2]);
+                    if (main_th[3] == nullptr)  main_th[3]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 1, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[3]);
+                    if (main_th[4] == nullptr)  main_th[4]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 1, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[4]);
+                    if (main_th[5] == nullptr)  main_th[5]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 1, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[5]);
+                    if (main_th[6] == nullptr)  main_th[6]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 2, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[6]);
+                    if (main_th[7] == nullptr)  main_th[7]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 2, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[7]);
+                    if (main_th[8] == nullptr)  main_th[8]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 2, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[8]);
+                    if (main_th[9] == nullptr)  main_th[9]  = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 3, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[9]);
+                    if (main_th[10] == nullptr) main_th[10] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 3, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[10]);
+                    if (main_th[11] == nullptr) main_th[11] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 3, 3, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[11]);
                 }
                 else if (ViewMode == IDM_VIEW_16)//Mode4View==true
                 {
                     std::vector<std::vector<std::vector<std::string>>> _cam_urls_list = splitIntoN(cam_urls, 16);
-                    if (main_th[0]  == nullptr) main_th[0] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[0],  pAICSV);
-                    if (main_th[1]  == nullptr) main_th[1] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[1],  pAICSV);
-                    if (main_th[2]  == nullptr) main_th[2] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[2],  pAICSV);
-                    if (main_th[3]  == nullptr) main_th[3] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 0), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[3],  pAICSV);
-                    if (main_th[4]  == nullptr) main_th[4] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[4],  pAICSV);
-                    if (main_th[5]  == nullptr) main_th[5] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[5],  pAICSV);
-                    if (main_th[6]  == nullptr) main_th[6] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[6],  pAICSV);
-                    if (main_th[7]  == nullptr) main_th[7] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 1), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[7],  pAICSV);
-                    if (main_th[8]  == nullptr) main_th[8] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[8],  pAICSV);
-                    if (main_th[9]  == nullptr) main_th[9] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[9],  pAICSV);
-                    if (main_th[10] == nullptr) main_th[10] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[10], pAICSV);
-                    if (main_th[11] == nullptr) main_th[11] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 2), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[11], pAICSV);
-                    if (main_th[12] == nullptr) main_th[12] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 3), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[12], pAICSV);
-                    if (main_th[13] == nullptr) main_th[13] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 3), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[13], pAICSV);
-                    if (main_th[14] == nullptr) main_th[14] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 3), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[14], pAICSV);
-                    if (main_th[15] == nullptr) main_th[15] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 3), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[15], pAICSV);
+                    if (main_th[0]  == nullptr) main_th[0] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[0]);
+                    if (main_th[1]  == nullptr) main_th[1] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[1]);
+                    if (main_th[2]  == nullptr) main_th[2] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[2]);
+                    if (main_th[3]  == nullptr) main_th[3] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 0), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[3]);
+                    if (main_th[4]  == nullptr) main_th[4] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[4]);
+                    if (main_th[5]  == nullptr) main_th[5] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[5]);
+                    if (main_th[6]  == nullptr) main_th[6] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[6]);
+                    if (main_th[7]  == nullptr) main_th[7] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 1), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[7]);
+                    if (main_th[8]  == nullptr) main_th[8] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[8]);
+                    if (main_th[9]  == nullptr) main_th[9] =  new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[9]);
+                    if (main_th[10] == nullptr) main_th[10] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[10]);
+                    if (main_th[11] == nullptr) main_th[11] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 2), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[11]);
+                    if (main_th[12] == nullptr) main_th[12] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 0, 3), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[12]);
+                    if (main_th[13] == nullptr) main_th[13] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 1, 3), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[13]);
+                    if (main_th[14] == nullptr) main_th[14] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 2, 3), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[14]);
+                    if (main_th[15] == nullptr) main_th[15] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(4, 4, 3, 3), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[15]);
                 }
                 //ここからはforルーチンで
                 else if (ViewMode == IDM_VIEW_36)//Mode4View==true
@@ -1803,7 +1883,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         for (int j=0; j < 6; j++)
                         {
                             if (main_th[k] == nullptr)
-                                main_th[k] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(6, 6, i, j), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[k], pAICSV);
+                                main_th[k] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(6, 6, i, j), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[k]);
                             k++;
                         }
                 }
@@ -1815,7 +1895,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         for (int j=0; j < 8; j++)
                         {
                             if (main_th[k] == nullptr)
-                                main_th[k] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(8, 8, i, j), false, pt_YoloObjectDetection, _ptg_posenet, _cam_urls_list[k], pAICSV);
+                                main_th[k] = new std::thread(&DrawCV2Window, DrawCycleMode, hWnd, hDC, DrawArea(8, 8, i, j), false, ptYoloOBJECTDECTECTION, ptPOSENET, _cam_urls_list[k]);
                             k++;
                         }
                 }
@@ -1823,11 +1903,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             if (appmode == APPMODE_MOVFILE)
             {
                 //多重起動を避ける
-                //if (!cvw_file_processing && cvw_file_end)
-                if (!cvw_file_processing)
+                //if (!CVW_FILE_PROCESSING && CVW_FILE_END)
+                if (!CVW_FILE_PROCESSING)
                 {
                     //falseにするのはDrawCV2Windowfの中
-                    cvw_file_processing = true;
+                    CVW_FILE_PROCESSING = true;
                     //描画スレッドがあった場合はクリア
                     PROC_STOP();
                    
@@ -1841,19 +1921,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                             hDC,
                             DrawArea(1, 1, 0, 0),
                             true,
-                            pt_YoloObjectDetection,
-                            _ptg_posenet,
-                            video_file_path,
-                            pAICSV);
+                            ptYoloOBJECTDECTECTION,
+                            ptPOSENET,
+                            video_file_path
+                            //pAICSV
+                        );
                     }
                 }
             }
             //EndPaint(hWnd, &ps);
             //ReleaseDC(hWnd, hDC);
-            wm_paint_now = false;
+            WM_PAINT_NOW = false;
         }
         //↓これ要る? 要らないようなので外す 11/18
-        //bSuppressPaint = false;
+        //bSUPPRESS_PAINT = false;
         break;
     }
     case WM_DESTROY:
@@ -1865,9 +1946,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         load_YoloObjectDetection(AI_UNLOAD);
         load_PoseNet(AI_UNLOAD);
 
-        read_write_file(INIFILE, RWFILE_WRITE);
+        read_write_file(init_file, RWFILE_WRITE);
         //↓テスト
-        read_write_file(INIFILE, RWFILE_READ);
+        //read_write_file(init_file, RWFILE_READ);
 
         break;
     default:

@@ -28,6 +28,44 @@ std::wstring _A2CW(const std::string& ascii)
     return wide.c_str();
 }
 
+//日付を整数で出力
+long GetCurrentDateLong()
+{
+    // 現在のローカル日時を取得
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    long _ret;
+
+    _ret = st.wYear * 10000 + st.wMonth * 100 + st.wDay;
+
+    //値渡し
+    return _ret;
+}
+//日付を文字列で出力
+std::string GetCurrentDateString(int _mode)
+{
+    // 現在のローカル日時を取得
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+
+    // 文字列ストリームを使用してフォーマットする
+    std::ostringstream oss;
+    if (_mode == GETDTSTR_FMT1)
+    {
+        oss << std::setw(4) << st.wYear << "/";
+        oss << std::setw(2) << std::setfill('0') << st.wMonth << "/";
+        oss << std::setw(2) << std::setfill('0') << st.wDay;
+    }
+    else
+    {
+        oss << std::setw(4) << st.wYear;
+        oss << std::setw(2) << std::setfill('0') << st.wMonth;
+        oss << std::setw(2) << std::setfill('0') << st.wDay;
+    }
+    //値渡し
+    return oss.str();
+}
+
 
 //時間を文字列で出力
 std::string GetCurrentDateTimeString(int _mode)
@@ -56,6 +94,7 @@ std::string GetCurrentDateTimeString(int _mode)
         oss << std::setw(2) << std::setfill('0') << st.wMinute;
         oss << std::setw(2) << std::setfill('0') << st.wSecond;
     }
+    //値渡し
     return oss.str();
 }
 
@@ -134,11 +173,11 @@ int  time_stump(cv::Mat& _image, float stump_size)
         return 0;
 
     //文字列追加
-    std::ostringstream _ost;
-    _ost << GetCurrentDateTimeString(GETDTSTR_FMT1);// << std::ends;
+    std::ostringstream _ai_csv_ostring;
+    _ai_csv_ostring << GetCurrentDateTimeString(GETDTSTR_FMT1);// << std::ends;
     long _error = 0;
-    cv::putText(_image, _ost.str(), cv::Point(5, 25), cv::FONT_HERSHEY_SIMPLEX, stump_size, cv::Scalar(0, 0, 0), 5);
-    cv::putText(_image, _ost.str(), cv::Point(5, 25), cv::FONT_HERSHEY_SIMPLEX, stump_size, cv::Scalar(0, 255, 0), 2);
+    cv::putText(_image, _ai_csv_ostring.str(), cv::Point(5, 25), cv::FONT_HERSHEY_SIMPLEX, stump_size, cv::Scalar(0, 0, 0), 5);
+    cv::putText(_image, _ai_csv_ostring.str(), cv::Point(5, 25), cv::FONT_HERSHEY_SIMPLEX, stump_size, cv::Scalar(0, 255, 0), 2);
     return _error;
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -155,7 +194,7 @@ void DoEvents(int n)
     }
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
-std::wstring stringToWstring(const std::string& s)
+std::wstring string2wstring(const std::string& s)
 {
     //int requiredSize = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, NULL, 0);
     int requiredSize = MultiByteToWideChar(CP_ACP, 0, s.c_str(), -1, NULL, 0);
@@ -169,7 +208,7 @@ std::wstring stringToWstring(const std::string& s)
 /*
     wstringをstringへ変換
 */
-std::string wstring2string(std::wstring oWString)
+std::string wstring2string(const std::wstring& oWString)
 {
     // wstring → SJIS
     int iBufferSize = WideCharToMultiByte(CP_OEMCP, 0, oWString.c_str(), -1, (char*)NULL, 0, NULL, NULL);
@@ -177,7 +216,8 @@ std::string wstring2string(std::wstring oWString)
     CHAR* cpMultiByte = new CHAR[iBufferSize];
     // wstring → SJIS
     WideCharToMultiByte(CP_OEMCP, 0, oWString.c_str(), -1, cpMultiByte, iBufferSize, NULL, NULL);
-    // stringの生成
+    
+    // stringの生成 ここじゃダメ 関数が消えた後消去されるかも 値渡しだから大丈夫?
     std::string oRet(cpMultiByte, cpMultiByte + iBufferSize - 1);
     // バッファの破棄
     delete[] cpMultiByte;
@@ -187,7 +227,7 @@ std::string wstring2string(std::wstring oWString)
 
 
 #pragma warning(disable : 4996)
-std::wstring test_stringToWstring(const std::string& str)
+std::wstring test_string2wstring(const std::string& str)
 {
     if (str.empty())
         return std::wstring();
@@ -200,6 +240,34 @@ std::wstring test_stringToWstring(const std::string& str)
     mbstowcs(&buffer[0], str.c_str(), buffer.size());
     return std::wstring(&buffer[0], charsNeeded);
 }
+
+/////////////////////////////////////////////////////////////////////////////////////////
+// フルパスからファイル名を抽出する関数
+std::string getFileName(const std::string& fullPath) 
+{
+    // '\' が最後に現れる位置を探す
+    size_t pos = fullPath.find_last_of('\\');
+    if (pos != std::string::npos) {
+        // '\' の次の位置からサブストリングを取得
+        return fullPath.substr(pos + 1);
+    }
+    return fullPath; // '\' が見つからなかった場合、fullPath そのものがファイル名かもしれない
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////
+// URLからIPアドレスを抽出する関数
+std::string getIPAddress(const std::string& url) {
+    size_t startPos = 7; // "http://" の長さ
+    //size_t startPos = url.find("http://");
+
+    size_t endPos = url.find('/', startPos); // 次の '/' の位置を探す
+    if (endPos == std::string::npos) {
+        return url.substr(startPos); // スラッシュがない場合は残り全部がIPアドレス
+    }
+
+    return url.substr(startPos, endPos - startPos); // IPアドレス部分を抽出
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 //経験上、HDCをやたらゲットするとおかしくなるので生成しない
 int AllPaintBlack(HWND hWnd, HDC hDC, DrawArea drawing_position)
@@ -286,7 +354,7 @@ int MyDrawText(HWND hWnd, HDC hDC, std::string& _text, int x0 , int y0 , bool _a
         DEFAULT_CHARSET,                                     // 文字セット
         OUT_DEFAULT_PRECIS,                                  // 出力精度
         CLIP_DEFAULT_PRECIS,                                 // クリッピング精度
-        DEFAULT_QUALITY,                                     // 出力品質
+        DEFAULT_QUALITY,                                     // 出力品質hjnbuuuuyt
         DEFAULT_PITCH | FF_SWISS,                            // ピッチとファミリー
         _T("Meiryo UI")                                      // フォント名
     );
@@ -295,8 +363,8 @@ int MyDrawText(HWND hWnd, HDC hDC, std::string& _text, int x0 , int y0 , bool _a
     SetBkMode(hDC, TRANSPARENT); // テキストの背景を透明にします。
     SetTextColor(hDC, RGB(255, 255, 255)); // テキストの色を白にします。
 
-    std::wstring _ostW = stringToWstring(_text_tmp);
-    DrawText(hDC, _ostW.c_str(), -1, &rect, DT_LEFT | DT_TOP | DT_WORDBREAK);
+    std::wstring _ai_csv_wostring = string2wstring(_text_tmp);
+    DrawText(hDC, _ai_csv_wostring.c_str(), -1, &rect, DT_LEFT | DT_TOP | DT_WORDBREAK);
 
     // 使用が終わった後、オブジェクトを選択解除し、削除します
     SelectObject(hDC, hOldFont);
@@ -308,13 +376,13 @@ int MyDrawText(HWND hWnd, HDC hDC, std::string& _text, int x0 , int y0 , bool _a
 /////////////////////////////////////////////////////////////////////////////////////////////
 //動画保存クラス
 /////////////////////////////////////////////////////////////////////////////////////////////
-my_video_writer::my_video_writer(const char* _fname)
-:my_video_writer()
+MyVideoWriter::MyVideoWriter(const char* _fname)
+:MyVideoWriter()
 {
-//    my_video_writer::my_video_writer();
+//    MyVideoWriter::MyVideoWriter();
     filename = _fname;
 }
-my_video_writer::my_video_writer()
+MyVideoWriter::MyVideoWriter()
 {
     fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
     //fourcc = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');
@@ -325,13 +393,13 @@ my_video_writer::my_video_writer()
     filename = "output.mp4";
 }
 
-int my_video_writer::open(const char* _fname)
+int MyVideoWriter::open(const char* _fname)
 {
     filename = _fname;
     return open();
 }
 
-int my_video_writer::open()
+int MyVideoWriter::open()
 {
     if (output.isOpened() == false)
     {
@@ -340,7 +408,7 @@ int my_video_writer::open()
     return 0;
 }
 
-int my_video_writer::write(cv::Mat& frame)
+int MyVideoWriter::write(cv::Mat& frame)
 {
     cv::Mat frame_resized;
 
@@ -368,7 +436,7 @@ int my_video_writer::write(cv::Mat& frame)
     }
     return 0;
 }
-int my_video_writer::release()
+int MyVideoWriter::release()
 {
     while (mtx.try_lock() == false)
     {
@@ -433,7 +501,7 @@ RECT RectSplit(RECT base, DrawArea _drawarea)
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Windowsのコントロールに書き込む関数
 //volatile bool DrawPicToHDC_flag = false;
-std::mutex Mutex_DrawCycle_Draw;
+std::mutex MUTEX_DRAWCYCLE_DRAWING;
 int DrawPicToHDC(cv::Mat cvImg, HWND hWnd, HDC hDC, bool bMaintainAspectRatio, DrawArea _drawarea, bool _gray) //bMaintainAspectRatio=true
 {
 
@@ -544,7 +612,7 @@ int DrawPicToHDC(cv::Mat cvImg, HWND hWnd, HDC hDC, bool bMaintainAspectRatio, D
         bitInfo.bmiHeader.biYPelsPerMeter = 0;
 
         //排他処理 ChatGPTによると必要
-        while (Mutex_DrawCycle_Draw.try_lock() == false)
+        while (MUTEX_DRAWCYCLE_DRAWING.try_lock() == false)
         {
             DoEvents();
             Sleep(5);
@@ -584,15 +652,15 @@ int DrawPicToHDC(cv::Mat cvImg, HWND hWnd, HDC hDC, bool bMaintainAspectRatio, D
             if(_hDC!=NULL)
                 ReleaseDC(hWnd, _hDC);
         }
-        Mutex_DrawCycle_Draw.unlock();
+        MUTEX_DRAWCYCLE_DRAWING.unlock();
 
     }
     return 0;
 }
 
-HMENU hMenu_for_fullscreen;
-RECT windowRect;
-bool isFullscreen=false;
+HMENU hMENU_FOR_FULLSCRENN;
+RECT mlWINDOWRECT;
+bool isFULLSCREEN=false;
 static std::vector<RECT> monitors;
 BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
 {
@@ -609,18 +677,18 @@ int set_fullscreen(HWND hWnd, int monitor)
     // 2番目のモニターを選択（存在する場合）
     if (monitors.size() > monitor)
     {
-        isFullscreen = true;
+        isFULLSCREEN = true;
         // 元のウィンドウサイズと位置を保存
-        GetWindowRect(hWnd, &windowRect);
+        GetWindowRect(hWnd, &mlWINDOWRECT);
         //hMenu = GetMenu(hWnd);
-        //hMenu_for_fullscreen = GetMenu(hWnd);
-        //SetMenu(hWnd, hMenu_for_fullscreen);
+        //hMENU_FOR_FULLSCRENN = GetMenu(hWnd);
+        //SetMenu(hWnd, hMENU_FOR_FULLSCRENN);
 
         // 2番目のモニターのスクリーン座標を取得
         RECT monitor_rect = monitors[monitor];
 
         // 現在のメニューバーを取得し、保存
-        hMenu_for_fullscreen = GetMenu(hWnd);
+        hMENU_FOR_FULLSCRENN = GetMenu(hWnd);
 
         // メニューバーを消す
         SetMenu(hWnd, NULL);
@@ -641,10 +709,10 @@ int set_fullscreen(HWND hWnd, int monitor)
 void ResumeWindow(HWND hWnd)
 {
     SetWindowLong(hWnd, GWL_STYLE, WS_OVERLAPPEDWINDOW);
-    SetWindowPos(hWnd, HWND_TOP, windowRect.left, windowRect.top, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top, SWP_FRAMECHANGED);
+    SetWindowPos(hWnd, HWND_TOP, mlWINDOWRECT.left, mlWINDOWRECT.top, mlWINDOWRECT.right - mlWINDOWRECT.left, mlWINDOWRECT.bottom - mlWINDOWRECT.top, SWP_FRAMECHANGED);
 
-    //hMenu_for_fullscreen = GetMenu(hWnd);
-    SetMenu(hWnd, hMenu_for_fullscreen);
+    //hMENU_FOR_FULLSCRENN = GetMenu(hWnd);
+    SetMenu(hWnd, hMENU_FOR_FULLSCRENN);
     ShowWindow(hWnd, SW_SHOW);
 
     InvalidateRect(hWnd, NULL, TRUE);
@@ -664,10 +732,10 @@ void ToggleFullscreenWithMenu(HWND hWnd)
         GetWindowPlacement(hWnd, &wp);
 
         // 現在のメニューバーを取得し、保存
-        hMenu_for_fullscreen = GetMenu(hWnd);
+        hMENU_FOR_FULLSCRENN = GetMenu(hWnd);
 
         //GetWindowRect(hwnd, &rcSaved);
-        GetWindowRect(hWnd, &windowRect);
+        GetWindowRect(hWnd, &mlWINDOWRECT);
 
         // モニター情報を取得
         MONITORINFO mi = { sizeof(mi) };
@@ -782,4 +850,15 @@ std::vector<std::vector<std::string>> readRecordsFromFile(const std::string& fil
         std::cerr << "Unable to open file: " << filename << std::endl;
     }
     return records;
+}
+
+void saveImageDataToFile(const std::vector<uchar>& data, const std::string& filename) {
+    std::ofstream file(filename, std::ios::binary);
+    if (file.is_open()) {
+        file.write(reinterpret_cast<const char*>(&data[0]), data.size());
+        file.close();
+    }
+    else {
+        std::cerr << "Failed to open file for writing." << std::endl;
+    }
 }

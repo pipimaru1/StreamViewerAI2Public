@@ -7,6 +7,7 @@
 #include "logfile.h"
 #include "pose.h"
 #include "StreamVierwer.h"
+#include "sqlutil.h"
 
 #define DRAW_ALL 0
 #define DRAW_UPLEFT 1
@@ -18,18 +19,22 @@
 #define INIT_FPS_MSEC 33 //1500
 #define INIT_INTERVAL_TIME_SEC 30 //8
 
-std::atomic<bool> cvw_stop = true;
+std::atomic<bool> CVW_STOP = true;
 std::atomic<bool> cvw_set_stop = false;
-std::atomic<bool> cvw_file_processing = false;
-std::atomic<bool> cvw_file_end = false;
+std::atomic<bool> CVW_FILE_PROCESSING = false;
+std::atomic<bool> CVW_FILE_END = false;
 
-//volatile int display_time_seconds = INIT_INTERVAL_TIME_SEC;// 8;
-std::atomic<int>  display_time_seconds = INIT_INTERVAL_TIME_SEC;// 8;
-std::atomic<int>  fram_interval_ms = INIT_FPS_MSEC;// 100 sleep
-std::atomic<bool> ai_text_output=false;
-std::atomic<bool> Next_source = false; //次の画面に行く
+//volatile int DISPLAY_TIME_SECOND = INIT_INTERVAL_TIME_SEC;// 8;
+std::atomic<int>  DISPLAY_TIME_SECOND = INIT_INTERVAL_TIME_SEC;// 8;
+std::atomic<int>  FRAME_INTERVAL_MS = INIT_FPS_MSEC;// 100 sleep
+std::atomic<bool> AI_TEXT_OUTPUT=false;
+std::atomic<bool> NEXT_SOURCE = false; //次の画面に行く
 std::atomic<bool> drawing_flag=false; //AIの演算が重なるのを防ぐ
 
+bool SQL_WRITE = 0;
+bool SQL_IMAGEWRITE = 0;
+SqlServer SqlServerAi;
+SqlServer SqlServerImage;
 
 int capture_error_count = 0;
 #define CAPTURE_ERRROR_COUNT_MAX 0
@@ -39,32 +44,33 @@ int capture_error_count = 0;
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 std::mutex Mutex_DrawCycle_Ai;
 
-my_video_writer mvw_org;	//入力画像の録画クラス
-my_video_writer mvw_ai;		//AI画像の録画クラス
+MyVideoWriter mlVIDEOWRITERORG;	//入力画像の録画クラス
+MyVideoWriter mlVIDEOWRITERAI;		//AI画像の録画クラス
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int set_display_time_seconds(int _display_time_seconds)
 {
-	display_time_seconds = _display_time_seconds;
-	return display_time_seconds;
+	DISPLAY_TIME_SECOND = _display_time_seconds;
+	return DISPLAY_TIME_SECOND;
 }
 
 int get_display_time_seconds()
 {
-	return display_time_seconds;
+	return DISPLAY_TIME_SECOND;
 }
 
 int set_frame_between_time(int _sleep)
 {
-	fram_interval_ms = _sleep;
-	return fram_interval_ms;
+	FRAME_INTERVAL_MS = _sleep;
+	return FRAME_INTERVAL_MS;
 }
 int get_frame_between_time()
 {
-	return fram_interval_ms;
+	return FRAME_INTERVAL_MS;
 }
 bool get_cvw_stop()
 {
-	return cvw_stop;
+	return CVW_STOP;
 }
 
 bool svw_wait_stop()
@@ -76,35 +82,72 @@ bool svw_wait_stop()
 	return get_cvw_stop();
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#define AICSVFILE "AI_"
+#define AICSVEXT ".CSV"
+std::string AICSVPATH = ".\\";
+std::mutex FILE_MUTEX;
+//std::atomic<bool> fileatomic = false;
+std::ofstream* pAICSV = nullptr;
+extern bool AI_DATA_CSV_WRITE=true; //ファイルに書き込まないときはfalse オーバーフロー防止 
+extern bool AI_DATA_CSV_OVER_WRITE=false; //上書きするときはtrue 追加書き込みはfalse
+long _csv_create_date=0;
+
+int open_ai_csv_file()
+{
+	//スレッドセーフ化
+	std::lock_guard<std::mutex> lock(FILE_MUTEX);
+	long _csv_create_date_new=GetCurrentDateLong();
+
+	if (_csv_create_date != _csv_create_date_new)
+	{
+		_csv_create_date = _csv_create_date_new;
+		if (pAICSV != nullptr)
+		{
+			pAICSV->close();
+			delete pAICSV;
+			pAICSV = nullptr;
+		}
+		std::string CSVFILE = AICSVPATH + AICSVFILE + GetCurrentDateString() + AICSVEXT;
+		if (AI_DATA_CSV_OVER_WRITE)
+			pAICSV = new std::ofstream(CSVFILE, std::ios_base::out); //上書き
+		else
+			pAICSV = new std::ofstream(CSVFILE, std::ios_base::app); //追加書き込み
+
+	}
+	return 0;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int set_score_threshold(float _st, void* _pt_YoloObjectDetection)
 {
 	//明示的にキャスト 
-	YoloObjectDetection* pt_YoloObjectDetection = (YoloObjectDetection*)_pt_YoloObjectDetection;
-	if (pt_YoloObjectDetection == nullptr)
+	YoloObjectDetection* ptYoloOBJECTDECTECTION = (YoloObjectDetection*)_pt_YoloObjectDetection;
+	if (ptYoloOBJECTDECTECTION == nullptr)
 		return -1;
 	else
-		pt_YoloObjectDetection->YP.score_threshold = _st;
+		ptYoloOBJECTDECTECTION->YP.score_threshold = _st;
 	return 0;
 }
 int set_nms_threshold(float _nms, void* _pt_YoloObjectDetection)
 {
 	//明示的にキャスト 
-	YoloObjectDetection* pt_YoloObjectDetection = (YoloObjectDetection*)_pt_YoloObjectDetection;
-	if (pt_YoloObjectDetection == nullptr)
+	YoloObjectDetection* ptYoloOBJECTDECTECTION = (YoloObjectDetection*)_pt_YoloObjectDetection;
+	if (ptYoloOBJECTDECTECTION == nullptr)
 		return -1;
 	else
-		pt_YoloObjectDetection->YP.nms_threshold = _nms;
+		ptYoloOBJECTDECTECTION->YP.nms_threshold = _nms;
 	return 0;
 }
 
 int set_conf_threshold(float _conf, void* _pt_YoloObjectDetection)
 {
 	//明示的にキャスト 
-	YoloObjectDetection* pt_YoloObjectDetection = (YoloObjectDetection*)_pt_YoloObjectDetection;
-	if (pt_YoloObjectDetection == nullptr)
+	YoloObjectDetection* ptYoloOBJECTDECTECTION = (YoloObjectDetection*)_pt_YoloObjectDetection;
+	if (ptYoloOBJECTDECTECTION == nullptr)
 		return -1;
 	else
-		pt_YoloObjectDetection->YP.confidence_thresgold = _conf;
+		ptYoloOBJECTDECTECTION->YP.confidence_thresgold = _conf;
 	return 0;
 }
 
@@ -123,6 +166,13 @@ void wait_drawing()
 	}
 }
 
+int sql_image(
+	const std::string& _str_location,
+	const std::string& _str_camera_url,
+	cv::Mat image_input
+);
+
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 0 正常
 // 1 キャプチャー画像の異常
@@ -132,25 +182,22 @@ int DrawCycle_Core_Yolo(
 	HDC hDC,
 	DrawArea _draw_area,
 	bool _keep_aspect,
-	//cv::VideoCapture& _capture,
-	cv::VideoCapture* _pt_capture,
+	//cv::VideoCapture* _pt_capture,
+	cv::Mat& image_input,
 	YoloObjectDetection* _pt_YoloObjectDetection,
-//	PoseNet* _pt_pose,
-	const std::string& _str_source1,
-	const std::string& _str_source2,
-	std::string& _ai_out_put_string,
-	std::ofstream* _pAICSV
-//	int _display_time_seconds
+	const std::string& _str_location,
+	const std::string& _str_camera_url,
+	std::string& _ai_out_put_string
 )
 {
 	//必要なMat
-	cv::Mat image_input;
+	//cv::Mat image_input;
 	cv::Mat image_resized;
 	cv::Mat image_post_proccesed;
 
 	//CSV出力
-	std::string _ost;
-	std::ostringstream _header;
+	std::string _string_ai_csv;
+	//std::ostringstream _header;
 
 	if (_pt_YoloObjectDetection == nullptr)
 	{
@@ -165,7 +212,7 @@ int DrawCycle_Core_Yolo(
 	}
 
 	//画像のリード
-	_pt_capture->read(image_input);
+	//_pt_capture->read(image_input);
 	//TRYCAT( _capture.read(image_input));
 
 	//画像データに異常があれば以下の処理を飛ばす
@@ -183,36 +230,126 @@ int DrawCycle_Core_Yolo(
 		(double)_pt_YoloObjectDetection->YP.input_width / image_input.cols,
 		(double)_pt_YoloObjectDetection->YP.input_height / image_input.rows);
 
-	_header << "AI,\"" << _str_source1 << "\"," << _str_source2 << "," << TimeStumpStr();
+	AiRecordHeader _ai_rec_header;
+	_ai_rec_header.Category = L"AI";
+	_ai_rec_header.Location = string2wstring(_str_location);
+	_ai_rec_header.StreamURL = string2wstring(getIPAddress(_str_camera_url));
+	_ai_rec_header.Timestamp = string2wstring(TimeStumpStr());
+
+	//_header << "AI,\"" << _str_location << "\"," << _str_camera_url << "," << TimeStumpStr();
+	std::vector<AiSqlOutput> _sql_ai_data;
+
 	//AIの処理
 	_pt_YoloObjectDetection->_pre_process(image_resized);
-	image_post_proccesed = _pt_YoloObjectDetection->_post_process(true, image_input.clone(), _header.str().c_str(), _ost);
+	//image_post_proccesed = _pt_YoloObjectDetection->_post_process(true, image_input.clone(), _header.str().c_str(), _string_ai_csv);
+	image_post_proccesed = _pt_YoloObjectDetection->_post_process(true, image_input.clone(), _ai_rec_header, _string_ai_csv, _sql_ai_data);
 
 	Mutex_DrawCycle_Ai.unlock();
 
-	mvw_ai.write(image_post_proccesed);
+	mlVIDEOWRITERAI.write(image_post_proccesed);
 
 	//描画
-	rec_stump(image_post_proccesed, mvw_ai.output.isOpened());
+	rec_stump(image_post_proccesed, mlVIDEOWRITERAI.output.isOpened());
 	DrawPicToHDC(image_post_proccesed, hWnd, hDC, _keep_aspect, _draw_area);//アスペクト比を維持する。
 
 	///////////////////////////////////
 	//解析データの保存処理
-	_ai_out_put_string = _ai_out_put_string + "\n" + _ost;
-	if (ai_text_output)
+	_ai_out_put_string = _ai_out_put_string + "\n" + _string_ai_csv;
+	if (AI_TEXT_OUTPUT)
 	{
 		//aiの出力をテキストで画面にバーっと出す。ターミネーター、のようにはならなかった。
 		MyDrawText(hWnd, hDC, _ai_out_put_string, 5, 50);
 	}
-
-	//AIの出力をテキストファイルに保存
-	if (_pAICSV != nullptr)
+	///////////////////////////////////
+	//解析データの保存処理SQL
+	//サーバーとデータ格納先の設定
+	if (SQL_WRITE) 
 	{
-		*_pAICSV << _ost;
-		_pAICSV->flush();
+		if(_sql_ai_data.size()!=0)
+			Sql_Write(SqlServerAi, _sql_ai_data, _sql_ai_data.size());
+	}
+	//sql_image(_str_location, _str_camera_url, image_input);
+
+	///////////////////////////////////
+	//AIの出力をテキストファイルに保存
+	//スレッドセーフ化
+	if (AI_DATA_CSV_WRITE)
+	{
+		std::lock_guard<std::mutex> lock(FILE_MUTEX);
+		if (pAICSV != nullptr)
+		{
+			if (pAICSV->is_open())
+			{
+				*pAICSV << _string_ai_csv;
+				pAICSV->flush();
+			}
+
+		}
 	}
 	return 0;
 }
+
+std::mutex MUTEX_SQL;
+
+int sql_image(
+	const std::string& _str_location,
+	const std::string& _str_camera_url,
+	cv::Mat image_input
+){
+	//std::atomic<bool> _sql_image;
+	std::lock_guard<std::mutex> lock(MUTEX_SQL);
+
+	if (image_input.empty() || image_input.rows == 0 || image_input.cols == 0)
+	{
+		return 0;
+	}
+
+//	if (0)
+	if (SQL_IMAGEWRITE)
+	{
+		SqlImageOutput _sql_image_data;
+		_sql_image_data.StreamURL = string2wstring(getIPAddress(_str_camera_url));
+		_sql_image_data.Category = L"AI";
+		_sql_image_data.EventID = EventID;
+		_sql_image_data.Location = string2wstring(_str_location);
+		_sql_image_data.Timestamp = string2wstring(TimeStumpStr());
+		//_sql_image_data.image = image_input.clone(); //	クローンしなくてもいいかなとは思うが一応 リサイズするならここ
+		//cv::resize(image_input, _sql_image_data.image, cv::Size(320, 240));//このクラスのサイズなら行くかも
+		//cv::resize(image_input, _sql_image_data.image, cv::Size(640, 480));
+		cv::resize(image_input, _sql_image_data.image, cv::Size(AISQL_IMAGE_WIDTH,AISQL_IMAGE_HEIGHT));
+
+		_sql_image_data.ImageWidth = _sql_image_data.image.cols;
+		_sql_image_data.ImageHeight = _sql_image_data.image.rows;
+
+		if (AISQL_IMAGE_FORMAT == L"JPG")
+		{
+			_sql_image_data.CompressOption = { cv::IMWRITE_JPEG_QUALITY, AISQL_IMAGE_QALITY };
+			_sql_image_data.CompressType = L"JPEG";
+		}
+		else
+		{
+			_sql_image_data.CompressOption = { cv::IMWRITE_PNG_COMPRESSION, 9 };
+			_sql_image_data.CompressType = L"PNG";
+		}
+
+
+		//Sql_ImageWriteW(SqlServerImage, _sql_image_data);
+		Sql_ImageWriteChunksW(SqlServerImage, _sql_image_data);
+		//Sql_ImageWriteS(SqlServerImage, _sql_image_data);
+	}
+	//暫定措置 SQLが上手くいかなかったんで、インデックスフォルダに保存
+	if (SQL_IMAGEWRITE)
+	{
+		//SqlImageOutput _sql_image_data;
+		cv::Mat _image;
+		std::wstring _StreamURL = string2wstring(getIPAddress(_str_camera_url));
+		cv::resize(image_input, _image, cv::Size(1280, 960));
+		std::wstring _filepath = SqlServerImage.image_index_folder + _StreamURL + L".jpg";
+		cv::imwrite(W2S(_filepath.c_str()), _image);
+	}
+	return 0;
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 0 正常
 // 1 キャプチャー画像に異常がある
@@ -222,19 +359,13 @@ int DrawCycle_Core_Pose(
 	HDC hDC,
 	DrawArea _draw_area,
 	bool _keep_aspect,
-	//cv::VideoCapture& _capture,
-	cv::VideoCapture* _pt_capture,
-	//YoloObjectDetection* _pt_YoloObjectDetection,
+	//cv::VideoCapture* _pt_capture,
+	cv::Mat& image_input,
 	PoseNet* _pt_pose
-	//const std::string& _str_source1,
-	//const std::string& _str_source2,
-	//std::string& _ai_out_put_string,
-	//std::ofstream* _pAICSV,
-	//int _display_time_seconds
 )
 {
 	//必要なMat
-	cv::Mat image_input;
+	//cv::Mat image_input;
 	cv::Mat image_resized;
 	cv::Mat image_post_proccesed;
 	//cv::Mat image_input_gray;
@@ -246,7 +377,7 @@ int DrawCycle_Core_Pose(
 	}
 	//画像のリード
 	//TRYCAT(_capture.read(image_input));
-	TRYCAT(_pt_capture->read(image_input));
+	//TRYCAT(_pt_capture->read(image_input));
 	//cvtColor(image_input, image_input_gray, cv::COLOR_BGR2GRAY);
 
 	if (image_input.empty() || image_input.rows == 0 || image_input.cols == 0)
@@ -258,7 +389,7 @@ int DrawCycle_Core_Pose(
 	//image_post_proccesed = _pt_pose->run_pose_multi(image_input, OUTPUT_IMAGE_MODE_NORMAL); //中でTRYCATを呼んでいる
 	Mutex_DrawCycle_Ai.unlock();
 
-	mvw_ai.write(image_post_proccesed);
+	mlVIDEOWRITERAI.write(image_post_proccesed);
 	DrawPicToHDC(image_post_proccesed, hWnd, hDC, _keep_aspect, _draw_area, false);//アスペクト比を維持する。
 	//DrawPicToHDC(image_post_proccesed, hWnd, hDC, _keep_aspect, _draw_area, true);//アスペクト比を維持する。
 
@@ -291,10 +422,10 @@ bool DrawCycle(
 	cv::VideoCapture* _pt_capture,
 	YoloObjectDetection* _pt_YoloObjectDetection,
 	PoseNet* _pt_pose,
-	const std::string& _str_source1,
-	const std::string& _str_source2,
+	const std::string& _str_location,
+	const std::string& _str_camera_url,
 	std::string& _ai_out_put_string,
-	std::ofstream* _pAICSV,
+//	std::ofstream* _pAICSV,
 	int _display_time_seconds,
 	int _stump_mode
 )
@@ -303,17 +434,19 @@ bool DrawCycle(
 	cv::Mat image_resized;
 	cv::Mat image_post_proccesed;
 
-	bool _next_source = Next_source; //次の画面に行く
+	bool _next_source = NEXT_SOURCE; //次の画面に行く
 	auto _start = std::chrono::steady_clock::now();
 
-	LOGMSG(_str_source1);
-	LOGMSG(_str_source2);
+	LOGMSG(_str_location);
+	LOGMSG(_str_camera_url);
 
 	bool _capture_success = true;
 	int _ret = 0;
 	
 	while (_capture_success)
 	{
+		_capture_success=_pt_capture->read(image_input);
+		
 		if (_DrawCycleMode == DRAWCYCLE_YOLO5 || _DrawCycleMode == DRAWCYCLE_YOLO8)
 		{
 			_ret=DrawCycle_Core_Yolo(
@@ -322,15 +455,12 @@ bool DrawCycle(
 				hDC,
 				_draw_area,
 				_keep_aspect,
-				//_capture,
-				_pt_capture,
+				//_pt_capture,
+				image_input,
 				_pt_YoloObjectDetection,
-				//	PoseNet* _pt_pose,
-				_str_source1,
-				_str_source2,
-				_ai_out_put_string,
-				_pAICSV
-				//	int _display_time_seconds
+				_str_location,
+				_str_camera_url,
+				_ai_out_put_string
 			);
 			if (_ret)
 				break;
@@ -343,29 +473,22 @@ bool DrawCycle(
 				hDC,
 				_draw_area,
 				_keep_aspect,
-				//_capture,
-				_pt_capture,
-				//YoloObjectDetection* _pt_YoloObjectDetection,
+				//_pt_capture,
+				image_input,
 				_pt_pose
-				//const std::string& _str_source1,
-				//const std::string& _str_source2,
-				//std::string& _ai_out_put_string,
-				//std::ofstream* _pAICSV,
-				//int _display_time_seconds
 			);
 			if (_ret)
 				break;
 		}
 		else
 		{
-			//_capture >> image_input;
-			//*_pt_capture >> image_input;
-			_capture_success=_pt_capture->read(image_input);
+			//_capture_success=_pt_capture->read(image_input);
 
 			if(_stump_mode & FLAG_TIMESTUMP)
 				time_stump(image_input,1.0);
-			mvw_org.write(image_input);
-			rec_stump(image_input, mvw_org.output.isOpened());
+			//sql_image(_str_location, _str_camera_url, image_input);//sqlサーバーに保存
+			mlVIDEOWRITERORG.write(image_input);
+			rec_stump(image_input, mlVIDEOWRITERORG.output.isOpened());
 			DrawPicToHDC(image_input, hWnd, hDC, _keep_aspect, _draw_area);//アスペクト比を維持する。
 			//DrawPicToHDC(image_input, hWnd, hDC, _keep_aspect, _spl_w, _spl_h, _num_w, _num_h);//アスペクト比を維持する。
 		}
@@ -374,7 +497,7 @@ bool DrawCycle(
 		//終了処理を優先する
 		if (cvw_set_stop == true)
 		{
-			LOGMSG2("cvw_set_stop==true", _str_source2);
+			LOGMSG2("cvw_set_stop==true", _str_camera_url);
 			break;
 		}
 
@@ -383,7 +506,7 @@ bool DrawCycle(
 		auto _now = std::chrono::steady_clock::now();
 		if (std::chrono::duration_cast<std::chrono::seconds>(_now - _start).count() >= _display_time_seconds && _display_time_seconds != 0)
 			_next_source = true;
-		if (timer_cycle_mode == 0 || display_time_seconds==0)
+		if (timer_cycle_mode == 0 || DISPLAY_TIME_SECOND==0)
 			_next_source = false; //次の画面に行かないようにする
 
 		////////////////////////////
@@ -393,24 +516,27 @@ bool DrawCycle(
 		for (int i = 0; i < _roop; i++)
 		{
 			DoEvents();
-			//Sleep(fram_interval_ms / _roop);
-			std::this_thread::sleep_for(std::chrono::milliseconds(fram_interval_ms)/ (float)_roop);
+			//Sleep(FRAME_INTERVAL_MS / _roop);
+			std::this_thread::sleep_for(std::chrono::milliseconds(FRAME_INTERVAL_MS)/ (float)_roop);
 		}
 
 		//グローバル変数をチェックし、スペースが押されていたら次のカメラに行く
 		//全画面でない場合は無視
 		//なんかもっといいアルゴリズムあるんじゃないの?
 		if (_draw_area.spl_w != 1 || _draw_area.spl_h != 1)
-			Next_source = false;
-		if(Next_source)
+			NEXT_SOURCE = false;
+		if(NEXT_SOURCE)
 			_next_source = true;
 		if (_next_source)
 		{
 			_next_source = false;
-			Next_source = false;
+			NEXT_SOURCE = false;
 			break;
 		}
 	}
+	//カメラを切り替える時に、SQLサーバーに保存
+	sql_image(_str_location, _str_camera_url, image_input);
+
 	//	BusyAI = false;
 	return _capture_success;
 }
@@ -420,24 +546,17 @@ bool DrawCycle(
 int CameraOpenCycle(
 	int _DrawCycleMode,
 	HWND hWnd,		//Windowハンドル
-	//int _draw_area,
-	//bool _keep_aspect,
-	//cv::VideoCapture& _capture,
 	cv::VideoCapture* _pt_capture,
 	YoloObjectDetection* _pt_YoloObjectDetection,
 	PoseNet* _pt_pose,
 	std::vector<std::vector<std::string>> _urls,
 	int _current_url_index,
 	bool& _usbcam
-//	std::ofstream* _pAICSV
 )
 {
 	bool _cam_on = false;
-	//int _current_url_index = 0;
 	std::string _ai_out_put_string;
 	std::string _ai_file_name = "";
-
-	//HDC hDC = ::GetDC(hWnd);
 
 	//明示的にキャスト 
 	if (_DrawCycleMode == DRAWCYCLE_YOLO5 && _pt_YoloObjectDetection != nullptr)
@@ -449,7 +568,6 @@ int CameraOpenCycle(
 //	else
 //		LOGMSGX("Unmatch AI model and names file");
 
-	//while文
 	while (_cam_on == false)
 	{
 		//ストップ指示があったら、カメラ切り替えループを出る
@@ -463,7 +581,7 @@ int CameraOpenCycle(
 		std::ostringstream _window_caption;
 		_window_caption << _urls[_current_url_index][0] << " " << _ai_file_name;
 
-		std::wstring newTitleW = stringToWstring(_window_caption.str().c_str());
+		std::wstring newTitleW = string2wstring(_window_caption.str().c_str());
 		SetWindowTextW(hWnd, newTitleW.c_str());
 
 		//bool return_cap;
@@ -508,9 +626,9 @@ int CameraOpenCycle(
 		{
 			_cam_on = true;
 
-			//bool _FPSSET = _capture.set(cv::CAP_PROP_FPS, 1000 / fram_interval_ms);
+			//bool _FPSSET = _capture.set(cv::CAP_PROP_FPS, 1000 / FRAME_INTERVAL_MS);
 			//double _FPS = _capture.get(cv::CAP_PROP_FPS);
-			bool _FPSSET = _pt_capture->set(cv::CAP_PROP_FPS, 1000 / fram_interval_ms);
+			bool _FPSSET = _pt_capture->set(cv::CAP_PROP_FPS, 1000 / FRAME_INTERVAL_MS);
 			double _FPS = _pt_capture->get(cv::CAP_PROP_FPS);
 			LOGMSG2("Camera set FPS ", _FPSSET);
 			LOGMSG2("Camera FPS ", _FPS);
@@ -554,7 +672,7 @@ int CameraOpenCycle(
 //カメラがオープンしたら、DrawCycleを処理し描画サイクルを処理させる。
 //DrawCycleから戻ってきたら次のカメラをオープンする。
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
-int Count_VideoCapture=0;
+int COUNT_VIDEOCAPTURE=0;
 int DrawCV2Window(
 	int _DrawCycleMode,
 	HWND hWnd,		//Windowハンドル
@@ -563,29 +681,25 @@ int DrawCV2Window(
 	bool _keep_aspect,
 	YoloObjectDetection* _pt_YoloObjectDetection,
 	PoseNet* _pt_pose,
-	std::vector<std::vector<std::string>> _urls,
-	std::ofstream* _pAICSV
+	std::vector<std::vector<std::string>> _urls
+	//std::ofstream* _pAICSV
 )
 {
 	bool _cam_on = false;
 	//bool _cycle = true;
 	bool _cycle = true;
 	bool _usbcam = false;
-	cvw_stop = 0;
+	CVW_STOP = 0;
 
 	std::string _ai_out_put_string;
 	std::string _ai_file_name = "";
 	int _current_url_index = 0;
-	//int Current_url_index = 0;
 
-	//cv::VideoCapture _capture;
-	//cv::VideoCapture* _pt_capture;
-
-	//HDC hDC = ::GetDC(hWnd);
 	//	ここからカメラ切り替えサイクル
 	while (_cycle) //
 	{
-		//HDC hDC = ::GetDC(hWnd);
+		// hDCのスコープ範囲を限定するためブロック化 
+		// ブロック化を外すと、例外処理等が連続するなどした場合、ハンドル不足になり、アプリケーションが無反応化する可能性がある。
 		{
 			cv::VideoCapture* _pt_capture;
 			_pt_capture = new cv::VideoCapture;
@@ -610,7 +724,7 @@ int DrawCV2Window(
 				//	std::ofstream* _pAICSV
 			);
 			if (_ret)
-				Count_VideoCapture++;
+				COUNT_VIDEOCAPTURE++;
 			//画面を黒く塗りつぶす
 			if (_keep_aspect && fix_cam_number == -1)
 			{
@@ -618,6 +732,9 @@ int DrawCV2Window(
 				AllPaintBlack(hWnd, _hDC, _draw_area);
 				ReleaseDC(hWnd, _hDC);
 			}
+			//暫定措置でここにいれる
+			//AIのCSV出力ファイルの更新処理。日が変わるとファイルを変える。
+			open_ai_csv_file();
 			////////////////////////////////////////////////////////////////
 			//描画サイクル
 			DrawCycle(
@@ -633,8 +750,8 @@ int DrawCV2Window(
 				_urls[_current_url_index][0],
 				_urls[_current_url_index][1],
 				_ai_out_put_string,
-				_pAICSV,
-				display_time_seconds,
+				//_pAICSV,
+				DISPLAY_TIME_SECOND,
 				FLAG_TIMESTUMP
 			);
 
@@ -644,8 +761,8 @@ int DrawCV2Window(
 			delete _pt_capture;
 			_pt_capture = nullptr;
 			if (_ret)
-				Count_VideoCapture--;
-			LOGMSG2("Count_VideoCapture", Count_VideoCapture);
+				COUNT_VIDEOCAPTURE--;
+			LOGMSG2("COUNT_VIDEOCAPTURE", COUNT_VIDEOCAPTURE);
 		}
 		_cam_on = false;
 
@@ -656,12 +773,12 @@ int DrawCV2Window(
 		_current_url_index = (_current_url_index + 1) % (int)_urls.size();
 	}
 	//処理がストップしたことをメインに伝える
-	cvw_stop = true;
+	CVW_STOP = true;
 
 	//ReleaseDC(hWnd, hDC);
 
-	mvw_org.release();
-	mvw_ai.release();
+	mlVIDEOWRITERORG.release();
+	mlVIDEOWRITERAI.release();
 
 	//マルチスレッドなので戻り値は無視される
 	return 0;
@@ -677,12 +794,12 @@ int DrawCV2Windowf(
 	//	void* _pt_ai,	//yolov5処理クラスのインスタンスへのポインタ nullだと無視
 	YoloObjectDetection* _pt_YoloObjectDetection,
 	PoseNet* _pt_pose,
-	std::string _file_name,
-	std::ofstream* _pAICSV
+	std::string _file_name
+	//std::ofstream* _pAICSV
 )
 {
 	bool _cam_on = false;
-	cvw_stop = 0;
+	CVW_STOP = 0;
 	cv::VideoCapture _capture;
 
 	std::string _ai_out_put_string;
@@ -702,7 +819,7 @@ int DrawCV2Windowf(
 	std::ostringstream window_caption;
 	window_caption << _file_name << " " << ai_file_name;
 
-	std::wstring newTitleW = stringToWstring(window_caption.str().c_str());
+	std::wstring newTitleW = string2wstring(window_caption.str().c_str());
 	SetWindowTextW(hWnd, newTitleW.c_str());
 
 	_capture.open(_file_name);
@@ -722,7 +839,7 @@ int DrawCV2Windowf(
 		_cam_on = false;
 	}
 
-	cvw_file_end = false;
+	CVW_FILE_END = false;
 
 	DrawCycle(
 		_DrawCycleMode,
@@ -736,7 +853,7 @@ int DrawCV2Windowf(
 		_file_name,
 		"",
 		_ai_out_put_string,
-		_pAICSV,
+		//_pAICSV,
 		0,
 		0 //TIMESTUMPなし
 	);
@@ -744,15 +861,15 @@ int DrawCV2Windowf(
 	_capture.release();
 
 	//処理が終わったことをwinprocに伝えるためのフラグ
-	cvw_file_processing = false;
-	cvw_file_end = true;
+	CVW_FILE_PROCESSING = false;
+	CVW_FILE_END = true;
 
 	//↓これ要るか?
-	cvw_stop = true;
+	CVW_STOP = true;
 
 	//ReleaseDC(hWnd, hDC);
-	mvw_org.release();
-	mvw_ai.release();
+	mlVIDEOWRITERORG.release();
+	mlVIDEOWRITERAI.release();
 	return 0;
 }
 

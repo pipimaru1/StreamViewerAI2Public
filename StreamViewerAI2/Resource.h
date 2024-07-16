@@ -60,6 +60,9 @@
 #define IDM_C_300				117
 #define IDM_C_600				118
 
+#define	IDM_F_60SEC 191 //  60SEC
+#define	IDM_F_30SEC 192 //  30SEC
+#define	IDM_F_10SEC 193 //  10SEC
 #define	IDM_F_0003 120 //  0.3FPS
 #define	IDM_F_0005 128 //  0.5FPS
 #define	IDM_F_0008 129 //  0.75FPS

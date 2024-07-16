@@ -961,10 +961,12 @@ xcopy /Y /D "$(LIBTORCHGPU)\libtorch\lib\*.dll" "$(OutDir)"
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="base64.cpp" />
     <ClCompile Include="cv_viewer.cpp" />
     <ClCompile Include="logfile.cpp" />
     <ClCompile Include="mylib.cpp" />
     <ClCompile Include="pose.cpp" />
+    <ClCompile Include="sqlutil.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release_452|x64'">Create</PrecompiledHeader>

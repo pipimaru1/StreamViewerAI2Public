@@ -8,6 +8,8 @@
 #include <vector>
 //#include <onnxruntime_cxx_api.h>
 
+#include "sqlutil.h"
+
 #define DEFAULT_ONNX_FILE_PATH "awz.onnx"
 #define DEFAULT_NAMES_FILE_PATH "awz.names"
 #define DEFAULT_ONNX_FILE_PATH_YOLOV5 "yolov5s.onnx"
@@ -30,6 +32,7 @@ extern float DEFAULT_SCORE_THRESHOLD;
 extern float DEFAULT_NMS_THRESHOLD;
 extern float DEFAULT_CONF_THRESHOLD;
 
+extern long long EventID;
 
 // Text parameters.
 #define FONT_SCALE_LABEL  0.4f
@@ -55,6 +58,7 @@ extern float DEFAULT_CONF_THRESHOLD;
 struct YoloAIParametors
 {
 public:
+    int GPU_Number;
     int yolo_version;
 
     float input_width;
@@ -132,10 +136,16 @@ public:
     cv::Mat _post_process(
         bool draw_image,
         const cv::Mat& input_image, 
-        std::string _header, std::string& _ost
+        //std::string _header, 
+        AiRecordHeader& _ai_rec_header,
+        std::string& _ai_csv_ostring,
+        std::vector<AiSqlOutput>& _sql_ai_data
     );
 
-    int init_yolov5(
+    //int load_YoloObjectDetection(int _load, std::wstring _file_onnx, std::wstring _file_names);
+
+
+    int init_object_detection(
         YoloAIParametors yp,
         bool __count_of_person, bool __count_of_time);
 
@@ -150,8 +160,10 @@ cv::Mat post_process_str(
     const cv::Mat& input_image, std::vector<cv::Mat>& outputs, const std::vector<std::string>& class_name,
     int& number_of_persons, std::vector<std::string>& class_list_view,
     std::string _header,            //“ú•t“™
-    std::string& _ost,               //AI‚Ì‰ğÍŒ‹‰Ê‚ğ‘‚«‚ñ‚¾•¶š—ñ‚ÌŠi”[êŠ
+    std::string& _ai_csv_ostring,               //AI‚Ì‰ğÍŒ‹‰Ê‚ğ‘‚«‚ñ‚¾•¶š—ñ‚ÌŠi”[êŠ
+    std::vector<AiSqlOutput>& _sql_ai_data,
     int _version
 );
 
-//LPCWSTR _A2CW(const std::string& ascii);
+/////////////////////////////////
+//YOLO V8
